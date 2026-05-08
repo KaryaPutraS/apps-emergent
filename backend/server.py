@@ -1,15 +1,16 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timezone
-
+from datetime import datetime, timedelta
+import bcrypt
+import secrets
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -17,73 +18,743 @@ load_dotenv(ROOT_DIR / '.env')
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ.get('DB_NAME', 'chatbot_manager')]
 
-# Create the main app without a prefix
 app = FastAPI()
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# ============================================================
+# MODELS
+# ============================================================
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class LoginRequest(BaseModel):
+    password: str
 
-# Add your routes to the router instead of directly to app
+class LoginResponse(BaseModel):
+    success: bool
+    token: Optional[str] = None
+    message: str
+
+class ConfigUpdate(BaseModel):
+    updates: Dict[str, Any]
+
+class AIAgentConfig(BaseModel):
+    systemPrompt: Optional[str] = None
+    businessInfo: Optional[str] = None
+    aiTemperature: Optional[float] = None
+    aiMaxTokens: Optional[int] = None
+    memoryLimit: Optional[int] = None
+    memoryTimeoutMinutes: Optional[int] = None
+    ruleAiEnabled: Optional[bool] = None
+
+class LicenseActivate(BaseModel):
+    licenseKey: str
+
+class RuleModel(BaseModel):
+    id: Optional[str] = None
+    priority: int = 10
+    name: str
+    triggerType: str = "contains"
+    triggerValue: str
+    response: str
+    isActive: bool = True
+    hitCount: int = 0
+    responseMode: str = "direct"
+    imageUrl: str = ""
+    imageCaption: str = ""
+
+class KnowledgeModel(BaseModel):
+    id: Optional[str] = None
+    category: str
+    keyword: str
+    content: str
+    isActive: bool = True
+
+class TemplateModel(BaseModel):
+    id: Optional[str] = None
+    name: str
+    content: str
+    category: str = "Umum"
+
+class ContactUpdate(BaseModel):
+    name: Optional[str] = None
+    tag: Optional[str] = None
+    note: Optional[str] = None
+    isBlocked: Optional[bool] = None
+
+class BroadcastCheck(BaseModel):
+    target: str = "all"
+    tag: Optional[str] = None
+    customNumbers: Optional[str] = None
+
+class BroadcastSend(BaseModel):
+    target: str = "all"
+    tag: Optional[str] = None
+    customNumbers: Optional[str] = None
+    message: str
+
+class TestRequest(BaseModel):
+    message: str
+
+class ResetRequest(BaseModel):
+    confirm: bool = True
+
+# ============================================================
+# AUTH HELPERS
+# ============================================================
+
+SESSION_TTL_SECONDS = 6 * 60 * 60
+DEFAULT_PASSWORD = "admin123"
+
+async def ensure_admin_password():
+    config = await db.config.find_one({"key": "admin_password_hash"})
+    if not config:
+        hashed = bcrypt.hashpw(DEFAULT_PASSWORD.encode(), bcrypt.gensalt()).decode()
+        await db.config.insert_one({"key": "admin_password_hash", "value": hashed, "updated_at": datetime.utcnow()})
+
+async def verify_password(plain: str) -> bool:
+    config = await db.config.find_one({"key": "admin_password_hash"})
+    if not config:
+        return plain == DEFAULT_PASSWORD
+    return bcrypt.checkpw(plain.encode(), config["value"].encode())
+
+async def create_session() -> str:
+    token = secrets.token_urlsafe(48)
+    await db.sessions.insert_one({
+        "token": token,
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(seconds=SESSION_TTL_SECONDS)
+    })
+    return token
+
+async def validate_token(authorization: Optional[str] = Header(None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token tidak valid. Silakan login ulang.")
+    token = authorization.replace("Bearer ", "")
+    session = await db.sessions.find_one({"token": token, "expires_at": {"$gt": datetime.utcnow()}})
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Silakan login ulang.")
+    return token
+
+# ============================================================
+# SEED DEFAULT DATA
+# ============================================================
+
+async def seed_defaults():
+    """Seed default config and sample data if collections are empty."""
+    # Config defaults
+    config_count = await db.config.count_documents({"key": {"$nin": ["admin_password_hash"]}})
+    if config_count == 0:
+        defaults = [
+            {"key": "wahaUrl", "value": "", "description": "URL WAHA API"},
+            {"key": "wahaSession", "value": "default", "description": "Nama session WhatsApp"},
+            {"key": "hasWahaApiKey", "value": False},
+            {"key": "aiProvider", "value": "GEMINI"},
+            {"key": "aiModel", "value": "gemini-2.0-flash"},
+            {"key": "hasAiApiKey", "value": False},
+            {"key": "ollamaUrl", "value": ""},
+            {"key": "systemPrompt", "value": "Kamu adalah customer service ramah. Tugas kamu menjawab pertanyaan pelanggan dengan friendly, singkat, dan informatif.\n\nATURAN:\n1. Selalu balas dalam Bahasa Indonesia santai\n2. Maksimal 3 kalimat per balasan\n3. Jika tidak tahu jawaban, arahkan ke kontak langsung"},
+            {"key": "businessInfo", "value": "Nama Toko: [Edit nama toko Anda]\nAlamat: [Edit alamat]\nJam Buka: Senin-Minggu, 08:00 - 21:00\nTelepon: 08xx-xxxx-xxxx"},
+            {"key": "aiTemperature", "value": 0.7},
+            {"key": "aiMaxTokens", "value": 500},
+            {"key": "memoryLimit", "value": 10},
+            {"key": "memoryTimeoutMinutes", "value": 30},
+            {"key": "ruleAiEnabled", "value": True},
+            {"key": "isBotActive", "value": True},
+            {"key": "workingHoursEnabled", "value": False},
+            {"key": "workingHoursStart", "value": "08:00"},
+            {"key": "workingHoursEnd", "value": "21:00"},
+            {"key": "offlineMessage", "value": "Halo kak, saat ini kami sudah tutup. Kami buka lagi besok jam 08:00."},
+            {"key": "typingSimulation", "value": True},
+            {"key": "responseDelayMs", "value": 2000},
+            {"key": "rateLimitPerMinute", "value": 15},
+            {"key": "maxIncomingMessageChars", "value": 2000},
+            {"key": "broadcastDailyLimit", "value": 100},
+            {"key": "broadcastBatchSize", "value": 10},
+            {"key": "defaultRuleResponseMode", "value": "direct"},
+            {"key": "logRetentionDays", "value": 30},
+            {"key": "messageRetentionDays", "value": 90},
+        ]
+        for d in defaults:
+            d["updated_at"] = datetime.utcnow()
+        await db.config.insert_many(defaults)
+
+    # Sample rules
+    if await db.rules.count_documents({}) == 0:
+        sample_rules = [
+            {"id": str(uuid.uuid4()), "priority": 1, "name": "Greeting", "triggerType": "contains", "triggerValue": "halo|hai|hello|hi|hey", "response": "Halo kak! Selamat datang. Ada yang bisa kami bantu?", "isActive": True, "hitCount": 0, "responseMode": "direct", "imageUrl": "", "imageCaption": "", "created_at": datetime.utcnow()},
+            {"id": str(uuid.uuid4()), "priority": 2, "name": "Menu", "triggerType": "contains", "triggerValue": "menu|daftar|harga|price", "response": "Berikut menu kami:\n- Espresso: 18k\n- Americano: 22k\n- Latte: 28k\n- Cappuccino: 28k", "isActive": True, "hitCount": 0, "responseMode": "ai_polish", "imageUrl": "", "imageCaption": "", "created_at": datetime.utcnow()},
+            {"id": str(uuid.uuid4()), "priority": 3, "name": "Jam Buka", "triggerType": "contains", "triggerValue": "buka|tutup|jam|operasional", "response": "Kami buka setiap hari, Senin-Minggu jam 08:00 - 21:00.", "isActive": True, "hitCount": 0, "responseMode": "direct", "imageUrl": "", "imageCaption": "", "created_at": datetime.utcnow()},
+        ]
+        await db.rules.insert_many(sample_rules)
+
+    # Sample knowledge
+    if await db.knowledge.count_documents({}) == 0:
+        sample_knowledge = [
+            {"id": str(uuid.uuid4()), "category": "Harga", "keyword": "harga|biaya|tarif|price", "content": "Espresso: Rp 18.000\nAmericano: Rp 22.000\nLatte: Rp 28.000\nCappuccino: Rp 28.000", "isActive": True, "created_at": datetime.utcnow()},
+            {"id": str(uuid.uuid4()), "category": "FAQ", "keyword": "parkir|wifi|toilet|mushola", "content": "Fasilitas: WiFi gratis, parkir luas, toilet bersih, mushola. Area smoking di outdoor.", "isActive": True, "created_at": datetime.utcnow()},
+        ]
+        await db.knowledge.insert_many(sample_knowledge)
+
+    # Sample templates
+    if await db.templates.count_documents({}) == 0:
+        sample_templates = [
+            {"id": str(uuid.uuid4()), "name": "Welcome Message", "category": "Greeting", "content": "Halo {nama}! Selamat datang. Ada yang bisa kami bantu hari ini?", "created_at": datetime.utcnow()},
+            {"id": str(uuid.uuid4()), "name": "Promo Bulanan", "category": "Marketing", "content": "Hai {nama}! Ada promo spesial bulan ini. Yuk mampir!", "created_at": datetime.utcnow()},
+        ]
+        await db.templates.insert_many(sample_templates)
+
+    # License default
+    if await db.license.count_documents({}) == 0:
+        await db.license.insert_one({
+            "valid": False,
+            "status": "missing",
+            "licenseKey": "",
+            "customerName": "",
+            "planName": "",
+            "expiresAt": "",
+            "maxActivations": 0,
+            "instanceId": str(uuid.uuid4()),
+        })
+
+    await ensure_admin_password()
+
+# ============================================================
+# STARTUP
+# ============================================================
+
+@app.on_event("startup")
+async def startup():
+    await db.sessions.create_index("expires_at", expireAfterSeconds=0)
+    await seed_defaults()
+    logger.info("ChatBot Manager backend started")
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()
+
+# ============================================================
+# AUTH ENDPOINTS
+# ============================================================
+
+@api_router.post("/auth/login", response_model=LoginResponse)
+async def login(req: LoginRequest):
+    if await verify_password(req.password):
+        token = await create_session()
+        await add_log("LOGIN_SUCCESS", "Admin login berhasil")
+        return LoginResponse(success=True, token=token, message="Login berhasil")
+    await add_log("LOGIN_FAILED", "Percobaan login gagal")
+    return LoginResponse(success=False, message="Password admin salah.")
+
+@api_router.post("/auth/logout")
+async def logout(token: str = Depends(validate_token)):
+    await db.sessions.delete_one({"token": token})
+    return {"success": True}
+
+@api_router.get("/auth/check")
+async def check_session(token: str = Depends(validate_token)):
+    license_doc = await db.license.find_one({}, {"_id": 0})
+    return {"valid": True, "license": license_doc}
+
+# ============================================================
+# DASHBOARD
+# ============================================================
+
+@api_router.get("/dashboard/stats")
+async def get_dashboard_stats(token: str = Depends(validate_token)):
+    total_messages = await db.messages.count_documents({})
+    total_contacts = await db.contacts.count_documents({})
+    active_rules = await db.rules.count_documents({"isActive": True})
+
+    # Aggregate AI calls and tokens
+    pipeline = [{"$group": {"_id": None, "totalTokens": {"$sum": "$tokensUsed"}, "aiCalls": {"$sum": {"$cond": [{"$gt": ["$tokensUsed", 0]}, 1, 0]}}}}]
+    agg = await db.messages.aggregate(pipeline).to_list(1)
+    tokens_used = agg[0]["totalTokens"] if agg else 0
+    ai_calls = agg[0]["aiCalls"] if agg else 0
+
+    bot_active_doc = await db.config.find_one({"key": "isBotActive"})
+    bot_active = bot_active_doc["value"] if bot_active_doc else True
+
+    return {
+        "totalMessages": total_messages,
+        "totalContacts": total_contacts,
+        "activeRules": active_rules,
+        "aiCalls": ai_calls,
+        "tokensUsed": tokens_used,
+        "botActive": bot_active,
+        "uptime": "99.8%",
+        "avgResponseTime": "1.2s"
+    }
+
+@api_router.get("/dashboard/chart")
+async def get_dashboard_chart(token: str = Depends(validate_token)):
+    chart_data = []
+    for i in range(6, -1, -1):
+        date = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
+        messages_in = await db.messages.count_documents({
+            "direction": "incoming",
+            "timestamp": {"$regex": f"^{date}"}
+        })
+        messages_out = await db.messages.count_documents({
+            "direction": "outgoing",
+            "timestamp": {"$regex": f"^{date}"}
+        })
+        chart_data.append({
+            "date": date,
+            "messagesIn": messages_in,
+            "messagesOut": messages_out,
+            "rulesMatched": 0,
+            "aiCalls": 0,
+        })
+    return chart_data
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+@api_router.get("/config")
+async def get_config(token: str = Depends(validate_token)):
+    configs = await db.config.find({"key": {"$ne": "admin_password_hash"}}, {"_id": 0}).to_list(100)
+    result = {}
+    for c in configs:
+        result[c["key"]] = c.get("value", "")
+    return result
+
+@api_router.put("/config")
+async def update_config(req: ConfigUpdate, token: str = Depends(validate_token)):
+    for key, value in req.updates.items():
+        if key == "admin_password_hash":
+            continue
+        await db.config.update_one(
+            {"key": key},
+            {"$set": {"value": value, "updated_at": datetime.utcnow()}},
+            upsert=True
+        )
+    await add_log("CONFIG_UPDATE", f"Config updated: {', '.join(req.updates.keys())}")
+    return {"success": True}
+
+@api_router.get("/config/ai-agent")
+async def get_ai_agent_config(token: str = Depends(validate_token)):
+    keys = ["systemPrompt", "businessInfo", "aiTemperature", "aiMaxTokens", "memoryLimit", "memoryTimeoutMinutes", "ruleAiEnabled"]
+    result = {}
+    for key in keys:
+        doc = await db.config.find_one({"key": key})
+        result[key] = doc["value"] if doc else ""
+    return result
+
+@api_router.put("/config/ai-agent")
+async def update_ai_agent_config(req: AIAgentConfig, token: str = Depends(validate_token)):
+    updates = req.dict(exclude_none=True)
+    for key, value in updates.items():
+        await db.config.update_one(
+            {"key": key},
+            {"$set": {"value": value, "updated_at": datetime.utcnow()}},
+            upsert=True
+        )
+    await add_log("AI_AGENT_UPDATE", f"AI Agent config updated: {', '.join(updates.keys())}")
+    return {"success": True, "updated_keys": list(updates.keys())}
+
+# ============================================================
+# LICENSE
+# ============================================================
+
+@api_router.get("/license")
+async def get_license(token: str = Depends(validate_token)):
+    doc = await db.license.find_one({}, {"_id": 0})
+    return doc or {"valid": False, "status": "missing"}
+
+@api_router.post("/license/activate")
+async def activate_license(req: LicenseActivate, token: str = Depends(validate_token)):
+    # Simulate license activation
+    license_data = {
+        "valid": True,
+        "status": "active",
+        "licenseKey": req.licenseKey,
+        "customerName": "Customer",
+        "planName": "Professional",
+        "expiresAt": (datetime.utcnow() + timedelta(days=365)).strftime("%Y-%m-%d"),
+        "maxActivations": 3,
+        "instanceId": str(uuid.uuid4()),
+    }
+    await db.license.update_one({}, {"$set": license_data}, upsert=True)
+    await add_log("LICENSE_ACTIVATED", f"Lisensi diaktifkan: {req.licenseKey}")
+    return license_data
+
+@api_router.delete("/license")
+async def clear_license(token: str = Depends(validate_token)):
+    await db.license.update_one({}, {"$set": {
+        "valid": False, "status": "missing", "licenseKey": "",
+        "customerName": "", "planName": "", "expiresAt": ""
+    }}, upsert=True)
+    await add_log("LICENSE_CLEARED", "Lisensi dihapus")
+    return {"success": True}
+
+# ============================================================
+# RULES
+# ============================================================
+
+@api_router.get("/rules")
+async def get_rules(token: str = Depends(validate_token)):
+    rules = await db.rules.find({}, {"_id": 0}).sort("priority", 1).to_list(200)
+    return rules
+
+@api_router.post("/rules")
+async def save_rule(rule: RuleModel, token: str = Depends(validate_token)):
+    rule_dict = rule.dict()
+    if not rule_dict.get("id"):
+        rule_dict["id"] = str(uuid.uuid4())
+    rule_dict["created_at"] = datetime.utcnow()
+
+    existing = await db.rules.find_one({"id": rule_dict["id"]})
+    if existing:
+        await db.rules.update_one({"id": rule_dict["id"]}, {"$set": rule_dict})
+    else:
+        await db.rules.insert_one(rule_dict)
+
+    await add_log("RULE_SAVED", f"Rule '{rule_dict['name']}' disimpan")
+    # Remove MongoDB _id before returning
+    rule_dict.pop("_id", None)
+    return {"success": True, "rule": rule_dict}
+
+@api_router.delete("/rules/{rule_id}")
+async def delete_rule(rule_id: str, token: str = Depends(validate_token)):
+    result = await db.rules.delete_one({"id": rule_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rule tidak ditemukan")
+    await add_log("RULE_DELETED", f"Rule {rule_id} dihapus")
+    return {"success": True}
+
+@api_router.put("/rules/{rule_id}/toggle")
+async def toggle_rule(rule_id: str, token: str = Depends(validate_token)):
+    rule = await db.rules.find_one({"id": rule_id})
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule tidak ditemukan")
+    new_status = not rule.get("isActive", True)
+    await db.rules.update_one({"id": rule_id}, {"$set": {"isActive": new_status}})
+    return {"success": True, "isActive": new_status}
+
+# ============================================================
+# KNOWLEDGE
+# ============================================================
+
+@api_router.get("/knowledge")
+async def get_knowledge(token: str = Depends(validate_token)):
+    items = await db.knowledge.find({}, {"_id": 0}).to_list(200)
+    return items
+
+@api_router.post("/knowledge")
+async def save_knowledge(item: KnowledgeModel, token: str = Depends(validate_token)):
+    item_dict = item.dict()
+    if not item_dict.get("id"):
+        item_dict["id"] = str(uuid.uuid4())
+    item_dict["created_at"] = datetime.utcnow()
+
+    existing = await db.knowledge.find_one({"id": item_dict["id"]})
+    if existing:
+        await db.knowledge.update_one({"id": item_dict["id"]}, {"$set": item_dict})
+    else:
+        await db.knowledge.insert_one(item_dict)
+
+    await add_log("KNOWLEDGE_SAVED", f"Knowledge '{item_dict['category']}' disimpan")
+    # Remove MongoDB _id before returning
+    item_dict.pop("_id", None)
+    return {"success": True, "item": item_dict}
+
+@api_router.delete("/knowledge/{item_id}")
+async def delete_knowledge(item_id: str, token: str = Depends(validate_token)):
+    result = await db.knowledge.delete_one({"id": item_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Knowledge tidak ditemukan")
+    await add_log("KNOWLEDGE_DELETED", f"Knowledge {item_id} dihapus")
+    return {"success": True}
+
+# ============================================================
+# TEMPLATES
+# ============================================================
+
+@api_router.get("/templates")
+async def get_templates(token: str = Depends(validate_token)):
+    items = await db.templates.find({}, {"_id": 0}).to_list(200)
+    return items
+
+@api_router.post("/templates")
+async def save_template(item: TemplateModel, token: str = Depends(validate_token)):
+    item_dict = item.dict()
+    if not item_dict.get("id"):
+        item_dict["id"] = str(uuid.uuid4())
+    item_dict["created_at"] = datetime.utcnow()
+
+    existing = await db.templates.find_one({"id": item_dict["id"]})
+    if existing:
+        await db.templates.update_one({"id": item_dict["id"]}, {"$set": item_dict})
+    else:
+        await db.templates.insert_one(item_dict)
+
+    await add_log("TEMPLATE_SAVED", f"Template '{item_dict['name']}' disimpan")
+    # Remove MongoDB _id before returning
+    item_dict.pop("_id", None)
+    return {"success": True, "item": item_dict}
+
+@api_router.delete("/templates/{item_id}")
+async def delete_template(item_id: str, token: str = Depends(validate_token)):
+    result = await db.templates.delete_one({"id": item_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Template tidak ditemukan")
+    await add_log("TEMPLATE_DELETED", f"Template {item_id} dihapus")
+    return {"success": True}
+
+# ============================================================
+# CONTACTS
+# ============================================================
+
+@api_router.get("/contacts")
+async def get_contacts(search: str = "", token: str = Depends(validate_token)):
+    query = {}
+    if search:
+        query = {"$or": [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search}},
+            {"tag": {"$regex": search, "$options": "i"}},
+        ]}
+    contacts = await db.contacts.find(query, {"_id": 0}).sort("lastInteraction", -1).to_list(500)
+    return contacts
+
+@api_router.put("/contacts/{chat_id}")
+async def update_contact(chat_id: str, update: ContactUpdate, token: str = Depends(validate_token)):
+    update_dict = {k: v for k, v in update.dict().items() if v is not None}
+    if not update_dict:
+        return {"success": True}
+    result = await db.contacts.update_one({"chatId": chat_id}, {"$set": update_dict})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Kontak tidak ditemukan")
+    return {"success": True}
+
+@api_router.delete("/contacts/{chat_id}")
+async def delete_contact(chat_id: str, token: str = Depends(validate_token)):
+    result = await db.contacts.delete_one({"chatId": chat_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Kontak tidak ditemukan")
+    await add_log("CONTACT_DELETED", f"Kontak {chat_id[:10]}... dihapus")
+    return {"success": True}
+
+# ============================================================
+# MESSAGES
+# ============================================================
+
+@api_router.get("/messages")
+async def get_messages(limit: int = 50, token: str = Depends(validate_token)):
+    messages = await db.messages.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    return messages
+
+# ============================================================
+# BROADCAST
+# ============================================================
+
+@api_router.post("/broadcast/check")
+async def check_broadcast(req: BroadcastCheck, token: str = Depends(validate_token)):
+    if req.target == "all":
+        count = await db.contacts.count_documents({"isBlocked": {"$ne": True}})
+    elif req.target == "tag" and req.tag:
+        tags = [t.strip() for t in req.tag.split(",")]
+        query = {"isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]}
+        count = await db.contacts.count_documents(query)
+    elif req.target == "custom" and req.customNumbers:
+        count = len([n for n in req.customNumbers.split("\n") if n.strip()])
+    else:
+        count = 0
+    return {"count": count}
+
+@api_router.post("/broadcast/send")
+async def send_broadcast(req: BroadcastSend, token: str = Depends(validate_token)):
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong")
+
+    # Get recipients
+    if req.target == "all":
+        contacts = await db.contacts.find({"isBlocked": {"$ne": True}}, {"chatId": 1}).to_list(500)
+    elif req.target == "tag" and req.tag:
+        tags = [t.strip() for t in req.tag.split(",")]
+        contacts = await db.contacts.find(
+            {"isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]},
+            {"chatId": 1}
+        ).to_list(500)
+    elif req.target == "custom" and req.customNumbers:
+        numbers = [n.strip() for n in req.customNumbers.split("\n") if n.strip()]
+        contacts = [{"chatId": f"{n}@c.us"} for n in numbers]
+    else:
+        contacts = []
+
+    count = len(contacts)
+    await add_log("BROADCAST_SENT", f"Broadcast dikirim ke {count} kontak")
+
+    # Log broadcast messages
+    for c in contacts:
+        await db.messages.insert_one({
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "chatId": c.get("chatId", "unknown"),
+            "direction": "outgoing",
+            "message": req.message[:200],
+            "responseType": "broadcast",
+            "tokensUsed": 0
+        })
+
+    return {"success": True, "sent": count}
+
+# ============================================================
+# LOGS
+# ============================================================
+
+@api_router.get("/logs")
+async def get_logs(limit: int = 50, token: str = Depends(validate_token)):
+    logs = await db.logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    return logs
+
+async def add_log(log_type: str, message: str):
+    await db.logs.insert_one({
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "type": log_type,
+        "message": message
+    })
+
+# ============================================================
+# TEST CENTER
+# ============================================================
+
+@api_router.post("/test/rule")
+async def test_rule(req: TestRequest, token: str = Depends(validate_token)):
+    msg = req.message.lower()
+    rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+
+    for rule in rules:
+        trigger = rule.get("triggerValue", "")
+        trigger_type = rule.get("triggerType", "contains")
+
+        if trigger_type == "contains":
+            keywords = [k.strip().lower() for k in trigger.split("|")]
+            if any(kw in msg for kw in keywords):
+                return {"type": "Rule Match", "status": "success", "detail": f'Rule "{rule["name"]}" cocok! Trigger: {trigger_type} "{trigger}", Response: {rule["response"][:100]}...'}
+        elif trigger_type == "exact":
+            if msg == trigger.lower():
+                return {"type": "Rule Match", "status": "success", "detail": f'Rule "{rule["name"]}" exact match!'}
+
+    return {"type": "Rule Match", "status": "no_match", "detail": "Tidak ada rule yang cocok dengan pesan tersebut."}
+
+@api_router.post("/test/knowledge")
+async def test_knowledge(req: TestRequest, token: str = Depends(validate_token)):
+    msg = req.message.lower()
+    items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
+
+    for item in items:
+        keywords = [k.strip().lower() for k in item.get("keyword", "").split("|")]
+        if any(kw in msg for kw in keywords):
+            return {"type": "Knowledge Match", "status": "success", "detail": f'Knowledge "{item["category"]}" cocok! Keyword: {item["keyword"]}, Content: {item["content"][:100]}...'}
+
+    return {"type": "Knowledge Match", "status": "no_match", "detail": "Tidak ada knowledge yang cocok."}
+
+@api_router.post("/test/full-flow")
+async def test_full_flow(req: TestRequest, token: str = Depends(validate_token)):
+    msg = req.message.lower()
+
+    # Check rules first
+    rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    for rule in rules:
+        keywords = [k.strip().lower() for k in rule.get("triggerValue", "").split("|")]
+        if any(kw in msg for kw in keywords):
+            return {"type": "Full Flow", "status": "success", "detail": f'Flow: Rule "{rule["name"]}" matched → Mode: {rule.get("responseMode", "direct")} → Response: "{rule["response"][:150]}"'}
+
+    # Check knowledge
+    items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
+    for item in items:
+        keywords = [k.strip().lower() for k in item.get("keyword", "").split("|")]
+        if any(kw in msg for kw in keywords):
+            return {"type": "Full Flow", "status": "success", "detail": f'Flow: Knowledge "{item["category"]}" matched → AI context → Response berdasarkan: {item["content"][:100]}...'}
+
+    return {"type": "Full Flow", "status": "success", "detail": "Flow: No rule/knowledge match → AI full response → Bot akan merespon dengan AI berdasarkan system prompt."}
+
+# ============================================================
+# RESET
+# ============================================================
+
+@api_router.post("/reset/config")
+async def reset_config(token: str = Depends(validate_token)):
+    await db.rules.delete_many({})
+    await db.knowledge.delete_many({})
+    await db.templates.delete_many({})
+    # Clear AI agent config
+    ai_keys = ["systemPrompt", "businessInfo", "aiTemperature", "aiMaxTokens", "memoryLimit", "memoryTimeoutMinutes", "ruleAiEnabled"]
+    for key in ai_keys:
+        await db.config.update_one({"key": key}, {"$set": {"value": ""}}, upsert=True)
+    await add_log("RESET_CONFIG", "Konfigurasi BOT direset")
+    return {"success": True, "message": "Konfigurasi BOT berhasil direset. Rules, Knowledge, Template dikosongkan."}
+
+@api_router.post("/reset/dashboard")
+async def reset_dashboard(token: str = Depends(validate_token)):
+    await add_log("RESET_DASHBOARD", "Data dashboard direset")
+    return {"success": True, "message": "Data dashboard berhasil direset."}
+
+@api_router.post("/reset/messages")
+async def reset_messages(token: str = Depends(validate_token)):
+    result = await db.messages.delete_many({})
+    await add_log("RESET_MESSAGES", f"Data pesan direset ({result.deleted_count} pesan dihapus)")
+    return {"success": True, "message": f"Data pesan berhasil direset. {result.deleted_count} pesan dihapus."}
+
+@api_router.post("/reset/contacts")
+async def reset_contacts(token: str = Depends(validate_token)):
+    result = await db.contacts.delete_many({})
+    await add_log("RESET_CONTACTS", f"Data kontak direset ({result.deleted_count} kontak dihapus)")
+    return {"success": True, "message": f"Data kontak berhasil direset. {result.deleted_count} kontak dihapus."}
+
+# ============================================================
+# PASSWORD CHANGE
+# ============================================================
+
+@api_router.post("/auth/change-password")
+async def change_password(
+    current_password: str = "",
+    new_password: str = "",
+    confirm_password: str = "",
+    token: str = Depends(validate_token)
+):
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail="Password lama dan baru wajib diisi.")
+    if not await verify_password(current_password):
+        raise HTTPException(status_code=400, detail="Password lama salah.")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password baru minimal 8 karakter.")
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="Konfirmasi password tidak cocok.")
+
+    hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    await db.config.update_one(
+        {"key": "admin_password_hash"},
+        {"$set": {"value": hashed, "updated_at": datetime.utcnow()}},
+        upsert=True
+    )
+    # Invalidate all sessions
+    await db.sessions.delete_many({})
+    new_token = await create_session()
+    await add_log("PASSWORD_CHANGED", "Password admin berhasil diganti")
+    return {"success": True, "token": new_token, "message": "Password berhasil diganti."}
+
+# ============================================================
+# HELLO WORLD (health check)
+# ============================================================
+
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "ChatBot Manager API v1.1.0", "status": "running"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
+# Include router and middleware
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()

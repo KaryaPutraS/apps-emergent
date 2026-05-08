@@ -17,10 +17,7 @@ const LoginPage = () => {
     setError('');
     setLoading(true);
     
-    // Simulate network delay
-    await new Promise(r => setTimeout(r, 800));
-    
-    const result = login(password);
+    const result = await login(password);
     setLoading(false);
     
     if (result.success) {
