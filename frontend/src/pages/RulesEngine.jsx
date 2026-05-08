@@ -1,0 +1,169 @@
+import React, { useState } from 'react';
+import { mockRules, triggerTypes, responseModes } from '../data/mockData';
+import { GitBranch, Plus, Edit, Trash2, X, Save, Image } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Textarea } from '../components/ui/textarea';
+import { Switch } from '../components/ui/switch';
+import { Badge } from '../components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { toast } from 'sonner';
+
+const RulesEngine = () => {
+  const [rules, setRules] = useState(mockRules);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
+
+  const emptyRule = { id: '', priority: rules.length + 1, name: '', triggerType: 'contains', triggerValue: '', response: '', isActive: true, hitCount: 0, responseMode: 'direct', imageUrl: '', imageCaption: '' };
+
+  const openNew = () => { setEditingRule({...emptyRule, id: String(Date.now())}); setModalOpen(true); };
+  const openEdit = (rule) => { setEditingRule({...rule}); setModalOpen(true); };
+  const handleSave = () => {
+    if (!editingRule.name || !editingRule.triggerValue || !editingRule.response) { toast.error('Lengkapi data rule!'); return; }
+    const exists = rules.find(r => r.id === editingRule.id);
+    if (exists) {
+      setRules(rules.map(r => r.id === editingRule.id ? editingRule : r));
+    } else {
+      setRules([...rules, editingRule]);
+    }
+    setModalOpen(false);
+    toast.success('Rule tersimpan!');
+  };
+  const handleDelete = (id) => { setRules(rules.filter(r => r.id !== id)); toast.success('Rule dihapus!'); };
+  const toggleActive = (id) => { setRules(rules.map(r => r.id === id ? {...r, isActive: !r.isActive} : r)); };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Rules Engine</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Auto-reply otomatis tanpa konsumsi token AI</p>
+        </div>
+        <Button onClick={openNew} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
+          <Plus className="w-4 h-4" /> Tambah Rule
+        </Button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <p className="text-sm text-slate-500 mb-4">
+          Rules dieksekusi <strong>sebelum AI</strong> berdasarkan prioritas (angka kecil = prioritas tinggi).
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Prio</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Nama</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">Tipe</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase hidden lg:table-cell">Trigger</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Hits</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Media</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                <th className="text-right py-3 px-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.sort((a,b) => a.priority - b.priority).map((rule) => (
+                <tr key={rule.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
+                  <td className="py-3 px-3 font-mono text-slate-600">{rule.priority}</td>
+                  <td className="py-3 px-3 font-medium text-slate-900">{rule.name}</td>
+                  <td className="py-3 px-3 hidden md:table-cell">
+                    <Badge variant="secondary" className="text-xs font-normal">{rule.triggerType}</Badge>
+                  </td>
+                  <td className="py-3 px-3 hidden lg:table-cell">
+                    <code className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 max-w-[200px] truncate block">{rule.triggerValue}</code>
+                  </td>
+                  <td className="py-3 px-3 text-slate-600">{rule.hitCount}</td>
+                  <td className="py-3 px-3">
+                    {rule.imageUrl ? <Image className="w-4 h-4 text-blue-500" /> : <span className="text-slate-300">-</span>}
+                  </td>
+                  <td className="py-3 px-3">
+                    <Switch checked={rule.isActive} onCheckedChange={() => toggleActive(rule.id)} />
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => openEdit(rule)} className="h-8 w-8 p-0 text-slate-400 hover:text-emerald-600">
+                        <Edit className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleDelete(rule.id)} className="h-8 w-8 p-0 text-slate-400 hover:text-red-600">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal */}
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingRule?.id && rules.find(r => r.id === editingRule.id) ? 'Edit Rule' : 'Tambah Rule Baru'}</DialogTitle>
+          </DialogHeader>
+          {editingRule && (
+            <div className="space-y-4 mt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Prioritas</label>
+                  <Input type="number" value={editingRule.priority} onChange={(e) => setEditingRule({...editingRule, priority: parseInt(e.target.value)||0})} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Nama Rule</label>
+                  <Input value={editingRule.name} onChange={(e) => setEditingRule({...editingRule, name: e.target.value})} placeholder="Nama rule" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Tipe Trigger</label>
+                  <select value={editingRule.triggerType} onChange={(e) => setEditingRule({...editingRule, triggerType: e.target.value})} className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                    {triggerTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Mode Balasan</label>
+                  <select value={editingRule.responseMode} onChange={(e) => setEditingRule({...editingRule, responseMode: e.target.value})} className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                    {responseModes.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-1">Trigger Value</label>
+                <Input value={editingRule.triggerValue} onChange={(e) => setEditingRule({...editingRule, triggerValue: e.target.value})} placeholder="kata1|kata2|kata3" />
+                <p className="text-xs text-slate-400 mt-1">Pisahkan kata kunci dengan | (pipe)</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-1">Balasan</label>
+                <Textarea value={editingRule.response} onChange={(e) => setEditingRule({...editingRule, response: e.target.value})} rows={4} placeholder="Isi balasan..." />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Image URL (opsional)</label>
+                  <Input value={editingRule.imageUrl} onChange={(e) => setEditingRule({...editingRule, imageUrl: e.target.value})} placeholder="https://..." />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Image Caption</label>
+                  <Input value={editingRule.imageCaption} onChange={(e) => setEditingRule({...editingRule, imageCaption: e.target.value})} placeholder="Caption gambar" />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Switch checked={editingRule.isActive} onCheckedChange={(v) => setEditingRule({...editingRule, isActive: v})} />
+                <span className="text-sm text-slate-700">Rule Aktif</span>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setModalOpen(false)}>Batal</Button>
+                <Button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-700 gap-2">
+                  <Save className="w-4 h-4" /> Simpan
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default RulesEngine;
