@@ -9,9 +9,9 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timedelta
-import bcrypt
 import secrets
 import httpx
+import hashlib
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -115,17 +115,46 @@ class AISetupMessage(BaseModel):
 SESSION_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_PASSWORD = "admin123"
 
+def hash_password(password: str, salt: str = None) -> str:
+    """Hash password with SHA-256 + salt. Portable across all platforms."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+    return f"{salt}${hashed}"
+
+def check_password(password: str, stored_hash: str) -> bool:
+    """Verify password against stored hash."""
+    if "$" not in stored_hash:
+        # Legacy plain comparison fallback
+        return password == stored_hash
+    parts = stored_hash.split("$", 1)
+    if len(parts) != 2:
+        return password == stored_hash
+    salt = parts[0]
+    expected = hash_password(password, salt)
+    return expected == stored_hash
+
 async def ensure_admin_password():
     config = await db.config.find_one({"key": "admin_password_hash"})
     if not config:
-        hashed = bcrypt.hashpw(DEFAULT_PASSWORD.encode(), bcrypt.gensalt()).decode()
+        hashed = hash_password(DEFAULT_PASSWORD)
         await db.config.insert_one({"key": "admin_password_hash", "value": hashed, "updated_at": datetime.utcnow()})
+    else:
+        # If stored hash is bcrypt format (starts with $2b$), migrate to new format
+        stored = config.get("value", "")
+        if stored.startswith("$2b$") or stored.startswith("$2a$"):
+            logger.info("Migrating password hash from bcrypt to SHA-256...")
+            hashed = hash_password(DEFAULT_PASSWORD)
+            await db.config.update_one(
+                {"key": "admin_password_hash"},
+                {"$set": {"value": hashed, "updated_at": datetime.utcnow()}}
+            )
 
 async def verify_password(plain: str) -> bool:
     config = await db.config.find_one({"key": "admin_password_hash"})
     if not config:
         return plain == DEFAULT_PASSWORD
-    return bcrypt.checkpw(plain.encode(), config["value"].encode())
+    return check_password(plain, config["value"])
 
 async def create_session() -> str:
     token = secrets.token_urlsafe(48)
@@ -733,7 +762,7 @@ async def change_password(
     if new_password != confirm_password:
         raise HTTPException(status_code=400, detail="Konfirmasi password tidak cocok.")
 
-    hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    hashed = hash_password(new_password)
     await db.config.update_one(
         {"key": "admin_password_hash"},
         {"$set": {"value": hashed, "updated_at": datetime.utcnow()}},
