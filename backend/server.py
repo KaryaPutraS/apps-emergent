@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timedelta
 import bcrypt
 import secrets
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -102,6 +103,10 @@ class TestRequest(BaseModel):
 
 class ResetRequest(BaseModel):
     confirm: bool = True
+
+class AISetupMessage(BaseModel):
+    message: str
+    history: List[Dict[str, str]] = []
 
 # ============================================================
 # AUTH HELPERS
@@ -739,6 +744,86 @@ async def change_password(
     new_token = await create_session()
     await add_log("PASSWORD_CHANGED", "Password admin berhasil diganti")
     return {"success": True, "token": new_token, "message": "Password berhasil diganti."}
+
+# ============================================================
+# AI SETUP (proxy to SatroAI API)
+# ============================================================
+
+AI_SETUP_URL = "https://lisensi.satroai.pro/ai-setup"
+AI_SETUP_PRODUCT_CODE = "satroai_chatbot_manager"
+AI_SETUP_APP_VERSION = "1.1.0-secure"
+
+@api_router.post("/ai-setup/chat")
+async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token)):
+    """Proxy chat messages to the SatroAI AI Setup API."""
+    # Get license info from DB
+    license_doc = await db.license.find_one({}, {"_id": 0})
+    if not license_doc or not license_doc.get("valid"):
+        raise HTTPException(status_code=400, detail="Lisensi belum aktif. Aktifkan lisensi terlebih dahulu di menu Lisensi.")
+
+    license_key = license_doc.get("licenseKey", "")
+    instance_id = license_doc.get("instanceId", str(uuid.uuid4()))
+
+    if not license_key:
+        raise HTTPException(status_code=400, detail="License key tidak ditemukan. Aktifkan lisensi di menu Lisensi.")
+
+    # Build payload for SatroAI API
+    payload = {
+        "license_key": license_key,
+        "product_code": AI_SETUP_PRODUCT_CODE,
+        "instance_id": instance_id,
+        "app_version": AI_SETUP_APP_VERSION,
+        "message": req.message,
+        "history": req.history,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                AI_SETUP_URL,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Try to parse JSON response regardless of status code
+        try:
+            data = response.json()
+        except Exception:
+            data = None
+
+        if response.status_code != 200:
+            logger.warning(f"AI Setup API status {response.status_code}: {response.text[:500]}")
+            # If the API returned a structured error, pass it through
+            if data and isinstance(data, dict):
+                error_msg = data.get("message") or data.get("error") or data.get("reply") or f"API error {response.status_code}"
+                return {
+                    "success": False,
+                    "reply": error_msg,
+                    "need_more_info": False,
+                    "drafts": []
+                }
+            raise HTTPException(
+                status_code=502,
+                detail=f"AI Setup API merespon dengan status {response.status_code}. Coba lagi nanti."
+            )
+
+        if not data:
+            raise HTTPException(status_code=502, detail="AI Setup API mengembalikan response kosong.")
+
+        # Log the AI setup call
+        await add_log("AI_SETUP_CALL", f"AI Setup chat: '{req.message[:50]}...' -> success={data.get('success', False)}")
+
+        return data
+
+    except httpx.TimeoutException:
+        logger.error("AI Setup API timeout")
+        raise HTTPException(status_code=504, detail="AI Setup API timeout. Coba lagi nanti.")
+    except httpx.RequestError as e:
+        logger.error(f"AI Setup API connection error: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Gagal terhubung ke AI Setup API: {str(e)}")
+    except Exception as e:
+        logger.error(f"AI Setup error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # ============================================================
 # HELLO WORLD (health check)

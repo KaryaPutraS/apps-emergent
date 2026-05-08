@@ -297,4 +297,13 @@ export const changePassword = async (currentPassword, newPassword, confirmPasswo
   return data;
 };
 
+// ============================================================
+// AI SETUP (real API via backend proxy)
+// ============================================================
+
+export const aiSetupChat = async (message, history = []) => {
+  const { data } = await apiClient.post('/ai-setup/chat', { message, history });
+  return data;
+};
+
 export default apiClient;
