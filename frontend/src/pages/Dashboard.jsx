@@ -10,9 +10,8 @@ import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 
 const ROLE_LABEL = {
-  admin: { label: 'Administrator', icon: Crown, color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
-  operator: { label: 'Operator', icon: Briefcase, color: 'text-blue-600 bg-blue-50 border-blue-200' },
-  viewer: { label: 'Viewer', icon: EyeIcon, color: 'text-slate-600 bg-slate-50 border-slate-200' },
+  superadmin: { label: 'Super Admin', icon: Crown, color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
+  user: { label: 'User', icon: Briefcase, color: 'text-blue-600 bg-blue-50 border-blue-200' },
 };
 
 const StatCard = ({ icon: Icon, label, value, trend, color }) => {
@@ -69,9 +68,9 @@ const Dashboard = () => {
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const role = currentUser?.role || 'admin';
-  const isAdmin = role === 'admin';
-  const roleCfg = ROLE_LABEL[role] || ROLE_LABEL.admin;
+  const role = currentUser?.role || 'user';
+  const isSuperAdmin = role === 'superadmin';
+  const roleCfg = ROLE_LABEL[role] || ROLE_LABEL.user;
   const RoleIcon = roleCfg.icon;
 
   const fetchData = async () => {
@@ -123,7 +122,7 @@ const Dashboard = () => {
       </div>
 
       {/* User stats — hanya tampil untuk admin */}
-      {isAdmin && (
+      {isSuperAdmin && (
         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl p-5 text-white">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -190,7 +189,7 @@ const Dashboard = () => {
               <span className="text-sm text-slate-500">Avg Response</span>
               <span className="text-sm font-medium text-slate-700">{stats.avgResponseTime}</span>
             </div>
-            {isAdmin && (
+            {isSuperAdmin && (
               <>
                 <div className="border-t border-slate-100 pt-3">
                   <div className="flex justify-between items-center">
@@ -229,7 +228,7 @@ const Dashboard = () => {
           <Button variant="ghost" onClick={() => setActiveTab('test-center')} className="gap-2 h-9">
             <Play className="w-4 h-4" /> Test Koneksi
           </Button>
-          {isAdmin && (
+          {isSuperAdmin && (
             <Button variant="ghost" onClick={() => setActiveTab('user-management')} className="gap-2 h-9 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50">
               <UserCog className="w-4 h-4" /> Kelola User
             </Button>

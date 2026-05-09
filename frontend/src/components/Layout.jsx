@@ -26,7 +26,11 @@ import TestCenter from '../pages/TestCenter';
 import Logs from '../pages/Logs';
 import UserManagement from '../pages/UserManagement';
 
-const allNavItems = [
+const superadminNavItems = [
+  { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
+];
+
+const userNavItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'main' },
   { id: 'license', label: 'Lisensi', icon: Key, group: 'main' },
   { id: 'connections', label: 'Koneksi', icon: Plug, group: 'main' },
@@ -40,7 +44,6 @@ const allNavItems = [
   { id: 'ai-setup', label: 'AI Setup', icon: Sparkles, group: 'tools' },
   { id: 'test-center', label: 'Test Center', icon: FlaskConical, group: 'tools' },
   { id: 'logs', label: 'Logs', icon: ScrollText, group: 'tools' },
-  { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'system', adminOnly: true },
   { id: 'reset-data', label: 'Reset Data', icon: RotateCcw, group: 'system' },
   { id: 'settings', label: 'Setting', icon: Settings, group: 'system' },
 ];
@@ -73,21 +76,27 @@ const pageComponents = {
 };
 
 const roleBadge = {
-  admin: { label: 'Admin', className: 'bg-emerald-500/20 text-emerald-300' },
-  operator: { label: 'Operator', className: 'bg-blue-500/20 text-blue-300' },
-  viewer: { label: 'Viewer', className: 'bg-slate-500/20 text-slate-300' },
+  superadmin: { label: 'Super Admin', className: 'bg-emerald-500/20 text-emerald-300' },
+  user: { label: 'User', className: 'bg-blue-500/20 text-blue-300' },
 };
 
 const Layout = () => {
   const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen, logout, currentUser } = useApp();
-  const ActivePage = pageComponents[activeTab] || Dashboard;
-  const role = currentUser?.role || 'admin';
+  const role = currentUser?.role || 'user';
+  const isSuperAdmin = role === 'superadmin';
 
-  const navItems = allNavItems.filter(item => !item.adminOnly || role === 'admin');
-  const groups = ['main', 'bot', 'data', 'tools', 'system'];
+  const navItems = isSuperAdmin ? superadminNavItems : userNavItems;
+  const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
 
-  const activeLabel = allNavItems.find(n => n.id === activeTab)?.label || 'Dashboard';
-  const badge = roleBadge[role] || roleBadge.admin;
+  // Superadmin always lands on user-management; user never accesses it
+  const safeTab = isSuperAdmin
+    ? (activeTab === 'user-management' ? 'user-management' : 'user-management')
+    : (activeTab === 'user-management' ? 'dashboard' : activeTab);
+  const ActivePage = pageComponents[safeTab] || Dashboard;
+
+  const allNavItems = [...superadminNavItems, ...userNavItems];
+  const activeLabel = allNavItems.find(n => n.id === safeTab)?.label || 'Dashboard';
+  const badge = roleBadge[role] || roleBadge.user;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -240,9 +249,8 @@ const Layout = () => {
                     {currentUser.fullName || currentUser.username}
                   </span>
                   <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                    role === 'admin' ? 'bg-emerald-100 text-emerald-700' :
-                    role === 'operator' ? 'bg-blue-100 text-blue-700' :
-                    'bg-slate-200 text-slate-600'
+                    role === 'superadmin' ? 'bg-emerald-100 text-emerald-700' :
+                    'bg-blue-100 text-blue-700'
                   }`}>
                     {badge.label}
                   </span>

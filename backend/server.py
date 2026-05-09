@@ -211,9 +211,9 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict:
         "fullName": session.get("fullName", "Administrator"),
     }
 
-async def require_admin(current_user: Dict = Depends(get_current_user)) -> Dict:
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Akses ditolak. Hanya admin yang dapat melakukan operasi ini.")
+async def require_superadmin(current_user: Dict = Depends(get_current_user)) -> Dict:
+    if current_user.get("role") != "superadmin":
+        raise HTTPException(status_code=403, detail="Akses ditolak. Hanya superadmin yang dapat melakukan operasi ini.")
     return current_user
 
 # ============================================================
@@ -258,7 +258,7 @@ async def seed_defaults():
             d["updated_at"] = datetime.utcnow()
         await db.config.insert_many(defaults)
 
-    # Seed default admin user in users collection
+    # Seed default superadmin user in users collection
     if await db.users.count_documents({}) == 0:
         hashed = hash_password(DEFAULT_PASSWORD)
         await db.users.insert_one({
@@ -266,12 +266,16 @@ async def seed_defaults():
             "username": "admin",
             "fullName": "Administrator",
             "email": "admin@example.com",
-            "role": "admin",
+            "role": "superadmin",
             "isActive": True,
             "passwordHash": hashed,
             "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "lastLogin": None,
         })
+    else:
+        # Migrate existing admin roles to superadmin
+        await db.users.update_many({"role": "admin"}, {"$set": {"role": "superadmin"}})
+        await db.users.update_many({"role": {"$in": ["operator", "viewer"]}}, {"$set": {"role": "user"}})
 
     # Sample rules
     if await db.rules.count_documents({}) == 0:
@@ -368,13 +372,13 @@ async def login(req: LoginRequest):
 
     # Fall back to legacy admin password for backward compatibility
     if username == "admin" and await verify_legacy_password(req.password):
-        token = await create_session(user_id="admin", username="admin", role="admin", full_name="Administrator")
+        token = await create_session(user_id="admin", username="admin", role="superadmin", full_name="Administrator")
         await add_log("LOGIN_SUCCESS", "Admin login berhasil (legacy)")
         return LoginResponse(
             success=True,
             token=token,
             message="Login berhasil",
-            user={"userId": "admin", "username": "admin", "role": "admin", "fullName": "Administrator"}
+            user={"userId": "admin", "username": "admin", "role": "superadmin", "fullName": "Administrator"}
         )
 
     await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk: {username}")
@@ -404,72 +408,75 @@ async def check_session(current_user: Dict = Depends(get_current_user)):
 # ============================================================
 
 @api_router.get("/users")
-async def get_users(admin: Dict = Depends(require_admin)):
+async def get_users(admin: Dict = Depends(require_superadmin)):
     users = await db.users.find({}, {"_id": 0, "passwordHash": 0}).to_list(200)
     return users
 
 @api_router.get("/users/stats")
-async def get_user_stats(admin: Dict = Depends(require_admin)):
+async def get_user_stats(admin: Dict = Depends(require_superadmin)):
     total = await db.users.count_documents({})
     active = await db.users.count_documents({"isActive": True})
-    admins = await db.users.count_documents({"role": "admin"})
-    operators = await db.users.count_documents({"role": "operator"})
-    viewers = await db.users.count_documents({"role": "viewer"})
+    superadmins = await db.users.count_documents({"role": "superadmin"})
     return {
         "total": total,
         "active": active,
         "inactive": total - active,
-        "admins": admins,
-        "operators": operators,
-        "viewers": viewers,
+        "admins": superadmins,
+        "superadmins": superadmins,
     }
 
 @api_router.post("/users")
-async def create_user(req: UserCreate, admin: Dict = Depends(require_admin)):
-    if len(req.password) < 8:
-        raise HTTPException(status_code=400, detail="Password minimal 8 karakter.")
+async def create_user(req: UserCreate, admin: Dict = Depends(require_superadmin)):
+    try:
+        if len(req.password) < 8:
+            raise HTTPException(status_code=400, detail="Password minimal 8 karakter.")
 
-    username = req.username.strip().lower()
-    if not username:
-        raise HTTPException(status_code=400, detail="Username tidak boleh kosong.")
+        username = req.username.strip().lower()
+        if not username:
+            raise HTTPException(status_code=400, detail="Username tidak boleh kosong.")
 
-    if req.role not in ("admin", "operator", "viewer"):
-        raise HTTPException(status_code=400, detail="Role tidak valid. Pilih: admin, operator, atau viewer.")
+        if req.role not in ("superadmin", "user"):
+            raise HTTPException(status_code=400, detail="Role tidak valid. Pilih: superadmin atau user.")
 
-    existing = await db.users.find_one({"username": username})
-    if existing:
-        raise HTTPException(status_code=400, detail=f"Username '{username}' sudah digunakan.")
+        existing = await db.users.find_one({"username": username})
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Username '{username}' sudah digunakan.")
 
-    hashed = hash_password(req.password)
-    user_doc = {
-        "id": str(uuid.uuid4()),
-        "username": username,
-        "fullName": req.fullName.strip(),
-        "email": req.email.strip(),
-        "role": req.role,
-        "isActive": req.isActive,
-        "passwordHash": hashed,
-        "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "lastLogin": None,
-    }
-    await db.users.insert_one(user_doc)
-    await add_log("USER_CREATED", f"User '{username}' ({req.role}) dibuat oleh admin '{admin['username']}'")
+        hashed = hash_password(req.password)
+        user_doc = {
+            "id": str(uuid.uuid4()),
+            "username": username,
+            "fullName": req.fullName.strip(),
+            "email": req.email.strip() if req.email else "",
+            "role": req.role,
+            "isActive": req.isActive,
+            "passwordHash": hashed,
+            "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "lastLogin": None,
+        }
+        await db.users.insert_one(user_doc)
+        await add_log("USER_CREATED", f"User '{username}' ({req.role}) dibuat oleh '{admin['username']}'")
 
-    user_doc.pop("_id", None)
-    user_doc.pop("passwordHash", None)
-    return {"success": True, "user": user_doc}
+        user_doc.pop("_id", None)
+        user_doc.pop("passwordHash", None)
+        return {"success": True, "user": user_doc}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {e}")
+        raise HTTPException(status_code=500, detail=f"Gagal membuat user: {str(e)}")
 
 @api_router.put("/users/{user_id}")
-async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(require_admin)):
+async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(require_superadmin)):
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
 
-    # Prevent removing the last admin
-    if req.role and req.role != "admin" and user.get("role") == "admin":
-        admin_count = await db.users.count_documents({"role": "admin", "isActive": True})
-        if admin_count <= 1:
-            raise HTTPException(status_code=400, detail="Tidak bisa mengubah role admin terakhir.")
+    # Prevent removing the last superadmin
+    if req.role and req.role != "superadmin" and user.get("role") == "superadmin":
+        sa_count = await db.users.count_documents({"role": "superadmin", "isActive": True})
+        if sa_count <= 1:
+            raise HTTPException(status_code=400, detail="Tidak bisa mengubah role superadmin terakhir.")
 
     update_dict = {}
     if req.fullName is not None:
@@ -477,14 +484,14 @@ async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(requi
     if req.email is not None:
         update_dict["email"] = req.email.strip()
     if req.role is not None:
-        if req.role not in ("admin", "operator", "viewer"):
+        if req.role not in ("superadmin", "user"):
             raise HTTPException(status_code=400, detail="Role tidak valid.")
         update_dict["role"] = req.role
     if req.isActive is not None:
-        if not req.isActive and user.get("role") == "admin":
-            admin_count = await db.users.count_documents({"role": "admin", "isActive": True})
-            if admin_count <= 1:
-                raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan admin terakhir.")
+        if not req.isActive and user.get("role") == "superadmin":
+            sa_count = await db.users.count_documents({"role": "superadmin", "isActive": True})
+            if sa_count <= 1:
+                raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan superadmin terakhir.")
         update_dict["isActive"] = req.isActive
     if req.password is not None:
         if len(req.password) < 8:
@@ -494,41 +501,41 @@ async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(requi
     if update_dict:
         await db.users.update_one({"id": user_id}, {"$set": update_dict})
 
-    await add_log("USER_UPDATED", f"User '{user['username']}' diupdate oleh admin '{admin['username']}'")
+    await add_log("USER_UPDATED", f"User '{user['username']}' diupdate oleh '{admin['username']}'")
     updated = await db.users.find_one({"id": user_id}, {"_id": 0, "passwordHash": 0})
     return {"success": True, "user": updated}
 
 @api_router.delete("/users/{user_id}")
-async def delete_user(user_id: str, admin: Dict = Depends(require_admin)):
+async def delete_user(user_id: str, admin: Dict = Depends(require_superadmin)):
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
 
-    if user.get("role") == "admin":
-        admin_count = await db.users.count_documents({"role": "admin"})
-        if admin_count <= 1:
-            raise HTTPException(status_code=400, detail="Tidak bisa menghapus admin terakhir.")
+    if user.get("role") == "superadmin":
+        sa_count = await db.users.count_documents({"role": "superadmin"})
+        if sa_count <= 1:
+            raise HTTPException(status_code=400, detail="Tidak bisa menghapus superadmin terakhir.")
 
     if user_id == admin["userId"]:
         raise HTTPException(status_code=400, detail="Tidak bisa menghapus akun sendiri.")
 
     await db.users.delete_one({"id": user_id})
     await db.sessions.delete_many({"userId": user_id})
-    await add_log("USER_DELETED", f"User '{user['username']}' dihapus oleh admin '{admin['username']}'")
+    await add_log("USER_DELETED", f"User '{user['username']}' dihapus oleh '{admin['username']}'")
     return {"success": True}
 
 @api_router.put("/users/{user_id}/toggle")
-async def toggle_user(user_id: str, admin: Dict = Depends(require_admin)):
+async def toggle_user(user_id: str, admin: Dict = Depends(require_superadmin)):
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
 
     new_status = not user.get("isActive", True)
 
-    if not new_status and user.get("role") == "admin":
-        admin_count = await db.users.count_documents({"role": "admin", "isActive": True})
-        if admin_count <= 1:
-            raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan admin terakhir.")
+    if not new_status and user.get("role") == "superadmin":
+        sa_count = await db.users.count_documents({"role": "superadmin", "isActive": True})
+        if sa_count <= 1:
+            raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan superadmin terakhir.")
 
     await db.users.update_one({"id": user_id}, {"$set": {"isActive": new_status}})
     if not new_status:

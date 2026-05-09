@@ -13,23 +13,17 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 
 const ROLE_CONFIG = {
-  admin: {
-    label: 'Admin',
+  superadmin: {
+    label: 'Super Admin',
     icon: Crown,
     badgeClass: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    desc: 'Akses penuh ke semua fitur termasuk kelola user',
+    desc: 'Hanya mengelola user — tidak punya akses ke fitur chatbot',
   },
-  operator: {
-    label: 'Operator',
+  user: {
+    label: 'User',
     icon: Briefcase,
     badgeClass: 'bg-blue-100 text-blue-700 border-blue-200',
-    desc: 'Akses ke fitur chatbot, kontak, pesan, dan broadcast',
-  },
-  viewer: {
-    label: 'Viewer',
-    icon: Eye,
-    badgeClass: 'bg-slate-100 text-slate-600 border-slate-200',
-    desc: 'Hanya bisa melihat dashboard, log, dan statistik',
+    desc: 'Akses penuh ke semua fitur chatbot',
   },
 };
 
@@ -37,7 +31,7 @@ const EMPTY_FORM = {
   username: '',
   fullName: '',
   email: '',
-  role: 'operator',
+  role: 'user',
   password: '',
   confirmPassword: '',
   isActive: true,
@@ -375,7 +369,7 @@ const UserManagement = () => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <StatCard icon={Users} label="Total User" value={stats.total} color="bg-slate-100 text-slate-600" />
           <StatCard icon={UserCheck} label="Aktif" value={stats.active} color="bg-emerald-100 text-emerald-600" />
-          <StatCard icon={ShieldCheck} label="Admin" value={stats.admins} color="bg-purple-100 text-purple-600" />
+          <StatCard icon={ShieldCheck} label="Super Admin" value={stats.superadmins || stats.admins || 0} color="bg-purple-100 text-purple-600" />
           <StatCard icon={UserX} label="Nonaktif" value={stats.inactive} color="bg-red-100 text-red-600" />
         </div>
       )}
@@ -383,7 +377,7 @@ const UserManagement = () => {
       {/* Role legend */}
       <div className="bg-slate-50 rounded-xl border border-slate-200 p-4">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Hak Akses Per Role</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {Object.entries(ROLE_CONFIG).map(([key, cfg]) => {
             const Icon = cfg.icon;
             return (
@@ -441,7 +435,7 @@ const UserManagement = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((u) => {
-                  const roleCfg = ROLE_CONFIG[u.role] || ROLE_CONFIG.viewer;
+                  const roleCfg = ROLE_CONFIG[u.role] || ROLE_CONFIG.user;
                   const RoleIcon = roleCfg.icon;
                   const isSelf = u.id === currentUser?.userId || u.username === currentUser?.username;
                   return (
@@ -449,9 +443,8 @@ const UserManagement = () => {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                            u.role === 'admin' ? 'bg-emerald-100 text-emerald-700' :
-                            u.role === 'operator' ? 'bg-blue-100 text-blue-700' :
-                            'bg-slate-100 text-slate-600'
+                            u.role === 'superadmin' ? 'bg-emerald-100 text-emerald-700' :
+                            'bg-blue-100 text-blue-700'
                           }`}>
                             {(u.fullName || u.username || '?').charAt(0).toUpperCase()}
                           </div>
