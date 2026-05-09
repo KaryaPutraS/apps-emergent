@@ -408,6 +408,22 @@ async def get_users(admin: Dict = Depends(require_admin)):
     users = await db.users.find({}, {"_id": 0, "passwordHash": 0}).to_list(200)
     return users
 
+@api_router.get("/users/stats")
+async def get_user_stats(admin: Dict = Depends(require_admin)):
+    total = await db.users.count_documents({})
+    active = await db.users.count_documents({"isActive": True})
+    admins = await db.users.count_documents({"role": "admin"})
+    operators = await db.users.count_documents({"role": "operator"})
+    viewers = await db.users.count_documents({"role": "viewer"})
+    return {
+        "total": total,
+        "active": active,
+        "inactive": total - active,
+        "admins": admins,
+        "operators": operators,
+        "viewers": viewers,
+    }
+
 @api_router.post("/users")
 async def create_user(req: UserCreate, admin: Dict = Depends(require_admin)):
     if len(req.password) < 8:
@@ -519,22 +535,6 @@ async def toggle_user(user_id: str, admin: Dict = Depends(require_admin)):
         await db.sessions.delete_many({"userId": user_id})
     await add_log("USER_TOGGLED", f"User '{user['username']}' {'diaktifkan' if new_status else 'dinonaktifkan'}")
     return {"success": True, "isActive": new_status}
-
-@api_router.get("/users/stats")
-async def get_user_stats(admin: Dict = Depends(require_admin)):
-    total = await db.users.count_documents({})
-    active = await db.users.count_documents({"isActive": True})
-    admins = await db.users.count_documents({"role": "admin"})
-    operators = await db.users.count_documents({"role": "operator"})
-    viewers = await db.users.count_documents({"role": "viewer"})
-    return {
-        "total": total,
-        "active": active,
-        "inactive": total - active,
-        "admins": admins,
-        "operators": operators,
-        "viewers": viewers,
-    }
 
 # ============================================================
 # DASHBOARD
