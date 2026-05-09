@@ -33,12 +33,14 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 class LoginRequest(BaseModel):
+    username: str = "admin"
     password: str
 
 class LoginResponse(BaseModel):
     success: bool
     token: Optional[str] = None
     message: str
+    user: Optional[Dict] = None
 
 class ConfigUpdate(BaseModel):
     updates: Dict[str, Any]
@@ -108,6 +110,26 @@ class AISetupMessage(BaseModel):
     message: str
     history: List[Dict[str, str]] = []
 
+class UserCreate(BaseModel):
+    username: str
+    fullName: str
+    email: str = ""
+    role: str = "operator"
+    password: str
+    isActive: bool = True
+
+class UserUpdate(BaseModel):
+    fullName: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    isActive: Optional[bool] = None
+    password: Optional[str] = None
+
+class ChangePasswordRequest(BaseModel):
+    currentPassword: str
+    newPassword: str
+    confirmPassword: str
+
 # ============================================================
 # AUTH HELPERS
 # ============================================================
@@ -116,16 +138,13 @@ SESSION_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_PASSWORD = "admin123"
 
 def hash_password(password: str, salt: str = None) -> str:
-    """Hash password with SHA-256 + salt. Portable across all platforms."""
     if salt is None:
         salt = secrets.token_hex(16)
     hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
     return f"{salt}${hashed}"
 
 def check_password(password: str, stored_hash: str) -> bool:
-    """Verify password against stored hash."""
     if "$" not in stored_hash:
-        # Legacy plain comparison fallback
         return password == stored_hash
     parts = stored_hash.split("$", 1)
     if len(parts) != 2:
@@ -140,7 +159,6 @@ async def ensure_admin_password():
         hashed = hash_password(DEFAULT_PASSWORD)
         await db.config.insert_one({"key": "admin_password_hash", "value": hashed, "updated_at": datetime.utcnow()})
     else:
-        # If stored hash is bcrypt format (starts with $2b$), migrate to new format
         stored = config.get("value", "")
         if stored.startswith("$2b$") or stored.startswith("$2a$"):
             logger.info("Migrating password hash from bcrypt to SHA-256...")
@@ -150,16 +168,20 @@ async def ensure_admin_password():
                 {"$set": {"value": hashed, "updated_at": datetime.utcnow()}}
             )
 
-async def verify_password(plain: str) -> bool:
+async def verify_legacy_password(plain: str) -> bool:
     config = await db.config.find_one({"key": "admin_password_hash"})
     if not config:
         return plain == DEFAULT_PASSWORD
     return check_password(plain, config["value"])
 
-async def create_session() -> str:
+async def create_session(user_id: str = "admin", username: str = "admin", role: str = "admin", full_name: str = "Administrator") -> str:
     token = secrets.token_urlsafe(48)
     await db.sessions.insert_one({
         "token": token,
+        "userId": user_id,
+        "username": username,
+        "role": role,
+        "fullName": full_name,
         "created_at": datetime.utcnow(),
         "expires_at": datetime.utcnow() + timedelta(seconds=SESSION_TTL_SECONDS)
     })
@@ -174,12 +196,31 @@ async def validate_token(authorization: Optional[str] = Header(None)) -> str:
         raise HTTPException(status_code=401, detail="Session expired. Silakan login ulang.")
     return token
 
+async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token tidak valid. Silakan login ulang.")
+    token = authorization.replace("Bearer ", "")
+    session = await db.sessions.find_one({"token": token, "expires_at": {"$gt": datetime.utcnow()}})
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Silakan login ulang.")
+    return {
+        "token": token,
+        "userId": session.get("userId", "admin"),
+        "username": session.get("username", "admin"),
+        "role": session.get("role", "admin"),
+        "fullName": session.get("fullName", "Administrator"),
+    }
+
+async def require_admin(current_user: Dict = Depends(get_current_user)) -> Dict:
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Akses ditolak. Hanya admin yang dapat melakukan operasi ini.")
+    return current_user
+
 # ============================================================
 # SEED DEFAULT DATA
 # ============================================================
 
 async def seed_defaults():
-    """Seed default config and sample data if collections are empty."""
     # Config defaults
     config_count = await db.config.count_documents({"key": {"$nin": ["admin_password_hash"]}})
     if config_count == 0:
@@ -216,6 +257,21 @@ async def seed_defaults():
         for d in defaults:
             d["updated_at"] = datetime.utcnow()
         await db.config.insert_many(defaults)
+
+    # Seed default admin user in users collection
+    if await db.users.count_documents({}) == 0:
+        hashed = hash_password(DEFAULT_PASSWORD)
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "username": "admin",
+            "fullName": "Administrator",
+            "email": "admin@example.com",
+            "role": "admin",
+            "isActive": True,
+            "passwordHash": hashed,
+            "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "lastLogin": None,
+        })
 
     # Sample rules
     if await db.rules.count_documents({}) == 0:
@@ -264,6 +320,7 @@ async def seed_defaults():
 @app.on_event("startup")
 async def startup():
     await db.sessions.create_index("expires_at", expireAfterSeconds=0)
+    await db.users.create_index("username", unique=True)
     await seed_defaults()
     logger.info("ChatBot Manager backend started")
 
@@ -277,22 +334,207 @@ async def shutdown():
 
 @api_router.post("/auth/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
-    if await verify_password(req.password):
-        token = await create_session()
-        await add_log("LOGIN_SUCCESS", "Admin login berhasil")
-        return LoginResponse(success=True, token=token, message="Login berhasil")
-    await add_log("LOGIN_FAILED", "Percobaan login gagal")
-    return LoginResponse(success=False, message="Password admin salah.")
+    username = req.username.strip().lower() if req.username else "admin"
+
+    # Check users collection first
+    user = await db.users.find_one({"username": username, "isActive": True})
+    if user:
+        if not check_password(req.password, user.get("passwordHash", "")):
+            await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk user: {username}")
+            return LoginResponse(success=False, message="Username atau password salah.")
+
+        token = await create_session(
+            user_id=str(user["id"]),
+            username=user["username"],
+            role=user["role"],
+            full_name=user.get("fullName", "")
+        )
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"lastLogin": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}}
+        )
+        await add_log("LOGIN_SUCCESS", f"User '{username}' login berhasil")
+        return LoginResponse(
+            success=True,
+            token=token,
+            message="Login berhasil",
+            user={
+                "userId": str(user["id"]),
+                "username": user["username"],
+                "role": user["role"],
+                "fullName": user.get("fullName", ""),
+            }
+        )
+
+    # Fall back to legacy admin password for backward compatibility
+    if username == "admin" and await verify_legacy_password(req.password):
+        token = await create_session(user_id="admin", username="admin", role="admin", full_name="Administrator")
+        await add_log("LOGIN_SUCCESS", "Admin login berhasil (legacy)")
+        return LoginResponse(
+            success=True,
+            token=token,
+            message="Login berhasil",
+            user={"userId": "admin", "username": "admin", "role": "admin", "fullName": "Administrator"}
+        )
+
+    await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk: {username}")
+    return LoginResponse(success=False, message="Username atau password salah.")
 
 @api_router.post("/auth/logout")
-async def logout(token: str = Depends(validate_token)):
-    await db.sessions.delete_one({"token": token})
+async def logout(current_user: Dict = Depends(get_current_user)):
+    await db.sessions.delete_one({"token": current_user["token"]})
     return {"success": True}
 
 @api_router.get("/auth/check")
-async def check_session(token: str = Depends(validate_token)):
+async def check_session(current_user: Dict = Depends(get_current_user)):
     license_doc = await db.license.find_one({}, {"_id": 0})
-    return {"valid": True, "license": license_doc}
+    return {
+        "valid": True,
+        "license": license_doc,
+        "user": {
+            "userId": current_user["userId"],
+            "username": current_user["username"],
+            "role": current_user["role"],
+            "fullName": current_user["fullName"],
+        }
+    }
+
+# ============================================================
+# USER MANAGEMENT (admin only)
+# ============================================================
+
+@api_router.get("/users")
+async def get_users(admin: Dict = Depends(require_admin)):
+    users = await db.users.find({}, {"_id": 0, "passwordHash": 0}).to_list(200)
+    return users
+
+@api_router.post("/users")
+async def create_user(req: UserCreate, admin: Dict = Depends(require_admin)):
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Password minimal 8 karakter.")
+
+    username = req.username.strip().lower()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username tidak boleh kosong.")
+
+    if req.role not in ("admin", "operator", "viewer"):
+        raise HTTPException(status_code=400, detail="Role tidak valid. Pilih: admin, operator, atau viewer.")
+
+    existing = await db.users.find_one({"username": username})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Username '{username}' sudah digunakan.")
+
+    hashed = hash_password(req.password)
+    user_doc = {
+        "id": str(uuid.uuid4()),
+        "username": username,
+        "fullName": req.fullName.strip(),
+        "email": req.email.strip(),
+        "role": req.role,
+        "isActive": req.isActive,
+        "passwordHash": hashed,
+        "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "lastLogin": None,
+    }
+    await db.users.insert_one(user_doc)
+    await add_log("USER_CREATED", f"User '{username}' ({req.role}) dibuat oleh admin '{admin['username']}'")
+
+    user_doc.pop("_id", None)
+    user_doc.pop("passwordHash", None)
+    return {"success": True, "user": user_doc}
+
+@api_router.put("/users/{user_id}")
+async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(require_admin)):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+
+    # Prevent removing the last admin
+    if req.role and req.role != "admin" and user.get("role") == "admin":
+        admin_count = await db.users.count_documents({"role": "admin", "isActive": True})
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Tidak bisa mengubah role admin terakhir.")
+
+    update_dict = {}
+    if req.fullName is not None:
+        update_dict["fullName"] = req.fullName.strip()
+    if req.email is not None:
+        update_dict["email"] = req.email.strip()
+    if req.role is not None:
+        if req.role not in ("admin", "operator", "viewer"):
+            raise HTTPException(status_code=400, detail="Role tidak valid.")
+        update_dict["role"] = req.role
+    if req.isActive is not None:
+        if not req.isActive and user.get("role") == "admin":
+            admin_count = await db.users.count_documents({"role": "admin", "isActive": True})
+            if admin_count <= 1:
+                raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan admin terakhir.")
+        update_dict["isActive"] = req.isActive
+    if req.password is not None:
+        if len(req.password) < 8:
+            raise HTTPException(status_code=400, detail="Password minimal 8 karakter.")
+        update_dict["passwordHash"] = hash_password(req.password)
+
+    if update_dict:
+        await db.users.update_one({"id": user_id}, {"$set": update_dict})
+
+    await add_log("USER_UPDATED", f"User '{user['username']}' diupdate oleh admin '{admin['username']}'")
+    updated = await db.users.find_one({"id": user_id}, {"_id": 0, "passwordHash": 0})
+    return {"success": True, "user": updated}
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str, admin: Dict = Depends(require_admin)):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+
+    if user.get("role") == "admin":
+        admin_count = await db.users.count_documents({"role": "admin"})
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Tidak bisa menghapus admin terakhir.")
+
+    if user_id == admin["userId"]:
+        raise HTTPException(status_code=400, detail="Tidak bisa menghapus akun sendiri.")
+
+    await db.users.delete_one({"id": user_id})
+    await db.sessions.delete_many({"userId": user_id})
+    await add_log("USER_DELETED", f"User '{user['username']}' dihapus oleh admin '{admin['username']}'")
+    return {"success": True}
+
+@api_router.put("/users/{user_id}/toggle")
+async def toggle_user(user_id: str, admin: Dict = Depends(require_admin)):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+
+    new_status = not user.get("isActive", True)
+
+    if not new_status and user.get("role") == "admin":
+        admin_count = await db.users.count_documents({"role": "admin", "isActive": True})
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan admin terakhir.")
+
+    await db.users.update_one({"id": user_id}, {"$set": {"isActive": new_status}})
+    if not new_status:
+        await db.sessions.delete_many({"userId": user_id})
+    await add_log("USER_TOGGLED", f"User '{user['username']}' {'diaktifkan' if new_status else 'dinonaktifkan'}")
+    return {"success": True, "isActive": new_status}
+
+@api_router.get("/users/stats")
+async def get_user_stats(admin: Dict = Depends(require_admin)):
+    total = await db.users.count_documents({})
+    active = await db.users.count_documents({"isActive": True})
+    admins = await db.users.count_documents({"role": "admin"})
+    operators = await db.users.count_documents({"role": "operator"})
+    viewers = await db.users.count_documents({"role": "viewer"})
+    return {
+        "total": total,
+        "active": active,
+        "inactive": total - active,
+        "admins": admins,
+        "operators": operators,
+        "viewers": viewers,
+    }
 
 # ============================================================
 # DASHBOARD
@@ -304,7 +546,6 @@ async def get_dashboard_stats(token: str = Depends(validate_token)):
     total_contacts = await db.contacts.count_documents({})
     active_rules = await db.rules.count_documents({"isActive": True})
 
-    # Aggregate AI calls and tokens
     pipeline = [{"$group": {"_id": None, "totalTokens": {"$sum": "$tokensUsed"}, "aiCalls": {"$sum": {"$cond": [{"$gt": ["$tokensUsed", 0]}, 1, 0]}}}}]
     agg = await db.messages.aggregate(pipeline).to_list(1)
     tokens_used = agg[0]["totalTokens"] if agg else 0
@@ -312,6 +553,9 @@ async def get_dashboard_stats(token: str = Depends(validate_token)):
 
     bot_active_doc = await db.config.find_one({"key": "isBotActive"})
     bot_active = bot_active_doc["value"] if bot_active_doc else True
+
+    total_users = await db.users.count_documents({})
+    active_users = await db.users.count_documents({"isActive": True})
 
     return {
         "totalMessages": total_messages,
@@ -321,7 +565,9 @@ async def get_dashboard_stats(token: str = Depends(validate_token)):
         "tokensUsed": tokens_used,
         "botActive": bot_active,
         "uptime": "99.8%",
-        "avgResponseTime": "1.2s"
+        "avgResponseTime": "1.2s",
+        "totalUsers": total_users,
+        "activeUsers": active_users,
     }
 
 @api_router.get("/dashboard/chart")
@@ -403,7 +649,6 @@ async def get_license(token: str = Depends(validate_token)):
 
 @api_router.post("/license/activate")
 async def activate_license(req: LicenseActivate, token: str = Depends(validate_token)):
-    # Simulate license activation
     license_data = {
         "valid": True,
         "status": "active",
@@ -450,7 +695,6 @@ async def save_rule(rule: RuleModel, token: str = Depends(validate_token)):
         await db.rules.insert_one(rule_dict)
 
     await add_log("RULE_SAVED", f"Rule '{rule_dict['name']}' disimpan")
-    # Remove MongoDB _id before returning
     rule_dict.pop("_id", None)
     return {"success": True, "rule": rule_dict}
 
@@ -494,7 +738,6 @@ async def save_knowledge(item: KnowledgeModel, token: str = Depends(validate_tok
         await db.knowledge.insert_one(item_dict)
 
     await add_log("KNOWLEDGE_SAVED", f"Knowledge '{item_dict['category']}' disimpan")
-    # Remove MongoDB _id before returning
     item_dict.pop("_id", None)
     return {"success": True, "item": item_dict}
 
@@ -529,7 +772,6 @@ async def save_template(item: TemplateModel, token: str = Depends(validate_token
         await db.templates.insert_one(item_dict)
 
     await add_log("TEMPLATE_SAVED", f"Template '{item_dict['name']}' disimpan")
-    # Remove MongoDB _id before returning
     item_dict.pop("_id", None)
     return {"success": True, "item": item_dict}
 
@@ -607,7 +849,6 @@ async def send_broadcast(req: BroadcastSend, token: str = Depends(validate_token
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong")
 
-    # Get recipients
     if req.target == "all":
         contacts = await db.contacts.find({"isBlocked": {"$ne": True}}, {"chatId": 1}).to_list(500)
     elif req.target == "tag" and req.tag:
@@ -625,7 +866,6 @@ async def send_broadcast(req: BroadcastSend, token: str = Depends(validate_token
     count = len(contacts)
     await add_log("BROADCAST_SENT", f"Broadcast dikirim ke {count} kontak")
 
-    # Log broadcast messages
     for c in contacts:
         await db.messages.insert_one({
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
@@ -693,14 +933,12 @@ async def test_knowledge(req: TestRequest, token: str = Depends(validate_token))
 async def test_full_flow(req: TestRequest, token: str = Depends(validate_token)):
     msg = req.message.lower()
 
-    # Check rules first
     rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
     for rule in rules:
         keywords = [k.strip().lower() for k in rule.get("triggerValue", "").split("|")]
         if any(kw in msg for kw in keywords):
             return {"type": "Full Flow", "status": "success", "detail": f'Flow: Rule "{rule["name"]}" matched → Mode: {rule.get("responseMode", "direct")} → Response: "{rule["response"][:150]}"'}
 
-    # Check knowledge
     items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
     for item in items:
         keywords = [k.strip().lower() for k in item.get("keyword", "").split("|")]
@@ -718,7 +956,6 @@ async def reset_config(token: str = Depends(validate_token)):
     await db.rules.delete_many({})
     await db.knowledge.delete_many({})
     await db.templates.delete_many({})
-    # Clear AI agent config
     ai_keys = ["systemPrompt", "businessInfo", "aiTemperature", "aiMaxTokens", "memoryLimit", "memoryTimeoutMinutes", "ruleAiEnabled"]
     for key in ai_keys:
         await db.config.update_one({"key": key}, {"$set": {"value": ""}}, upsert=True)
@@ -747,28 +984,42 @@ async def reset_contacts(token: str = Depends(validate_token)):
 # ============================================================
 
 @api_router.post("/auth/change-password")
-async def change_password(
-    current_password: str = "",
-    new_password: str = "",
-    confirm_password: str = "",
-    token: str = Depends(validate_token)
-):
-    if not current_password or not new_password:
+async def change_password(req: ChangePasswordRequest, current_user: Dict = Depends(get_current_user)):
+    if not req.currentPassword or not req.newPassword:
         raise HTTPException(status_code=400, detail="Password lama dan baru wajib diisi.")
-    if not await verify_password(current_password):
-        raise HTTPException(status_code=400, detail="Password lama salah.")
-    if len(new_password) < 8:
+    if len(req.newPassword) < 8:
         raise HTTPException(status_code=400, detail="Password baru minimal 8 karakter.")
-    if new_password != confirm_password:
+    if req.newPassword != req.confirmPassword:
         raise HTTPException(status_code=400, detail="Konfirmasi password tidak cocok.")
 
-    hashed = hash_password(new_password)
+    user_id = current_user["userId"]
+
+    # Check in users collection first
+    user = await db.users.find_one({"id": user_id})
+    if user:
+        if not check_password(req.currentPassword, user.get("passwordHash", "")):
+            raise HTTPException(status_code=400, detail="Password lama salah.")
+        hashed = hash_password(req.newPassword)
+        await db.users.update_one({"id": user_id}, {"$set": {"passwordHash": hashed}})
+        await db.sessions.delete_many({"userId": user_id})
+        new_token = await create_session(
+            user_id=user_id,
+            username=current_user["username"],
+            role=current_user["role"],
+            full_name=current_user["fullName"]
+        )
+        await add_log("PASSWORD_CHANGED", f"Password user '{current_user['username']}' berhasil diganti")
+        return {"success": True, "token": new_token, "message": "Password berhasil diganti."}
+
+    # Legacy admin fallback
+    if not await verify_legacy_password(req.currentPassword):
+        raise HTTPException(status_code=400, detail="Password lama salah.")
+    hashed = hash_password(req.newPassword)
     await db.config.update_one(
         {"key": "admin_password_hash"},
         {"$set": {"value": hashed, "updated_at": datetime.utcnow()}},
         upsert=True
     )
-    # Invalidate all sessions
     await db.sessions.delete_many({})
     new_token = await create_session()
     await add_log("PASSWORD_CHANGED", "Password admin berhasil diganti")
@@ -784,8 +1035,6 @@ AI_SETUP_APP_VERSION = "1.1.0-secure"
 
 @api_router.post("/ai-setup/chat")
 async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token)):
-    """Proxy chat messages to the SatroAI AI Setup API."""
-    # Get license info from DB
     license_doc = await db.license.find_one({}, {"_id": 0})
     if not license_doc or not license_doc.get("valid"):
         raise HTTPException(status_code=400, detail="Lisensi belum aktif. Aktifkan lisensi terlebih dahulu di menu Lisensi.")
@@ -796,7 +1045,6 @@ async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token
     if not license_key:
         raise HTTPException(status_code=400, detail="License key tidak ditemukan. Aktifkan lisensi di menu Lisensi.")
 
-    # Build payload for SatroAI API
     payload = {
         "license_key": license_key,
         "product_code": AI_SETUP_PRODUCT_CODE,
@@ -814,7 +1062,6 @@ async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token
                 headers={"Content-Type": "application/json"}
             )
 
-        # Try to parse JSON response regardless of status code
         try:
             data = response.json()
         except Exception:
@@ -822,26 +1069,15 @@ async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token
 
         if response.status_code != 200:
             logger.warning(f"AI Setup API status {response.status_code}: {response.text[:500]}")
-            # If the API returned a structured error, pass it through
             if data and isinstance(data, dict):
                 error_msg = data.get("message") or data.get("error") or data.get("reply") or f"API error {response.status_code}"
-                return {
-                    "success": False,
-                    "reply": error_msg,
-                    "need_more_info": False,
-                    "drafts": []
-                }
-            raise HTTPException(
-                status_code=502,
-                detail=f"AI Setup API merespon dengan status {response.status_code}. Coba lagi nanti."
-            )
+                return {"success": False, "reply": error_msg, "need_more_info": False, "drafts": []}
+            raise HTTPException(status_code=502, detail=f"AI Setup API merespon dengan status {response.status_code}. Coba lagi nanti.")
 
         if not data:
             raise HTTPException(status_code=502, detail="AI Setup API mengembalikan response kosong.")
 
-        # Log the AI setup call
         await add_log("AI_SETUP_CALL", f"AI Setup chat: '{req.message[:50]}...' -> success={data.get('success', False)}")
-
         return data
 
     except httpx.TimeoutException:
@@ -855,12 +1091,12 @@ async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # ============================================================
-# HELLO WORLD (health check)
+# HEALTH CHECK
 # ============================================================
 
 @api_router.get("/")
 async def root():
-    return {"message": "ChatBot Manager API v1.1.0", "status": "running"}
+    return {"message": "ChatBot Manager API v1.2.0", "status": "running"}
 
 # Include router and middleware
 app.include_router(api_router)

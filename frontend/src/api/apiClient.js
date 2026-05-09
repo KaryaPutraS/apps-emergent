@@ -52,8 +52,8 @@ apiClient.interceptors.response.use(
 // AUTH
 // ============================================================
 
-export const login = async (password) => {
-  const { data } = await apiClient.post('/auth/login', { password });
+export const login = async (username, password) => {
+  const { data } = await apiClient.post('/auth/login', { username, password });
   if (data.success && data.token) {
     setToken(data.token);
   }
@@ -126,6 +126,40 @@ export const activateLicense = async (licenseKey) => {
 
 export const clearLicense = async () => {
   const { data } = await apiClient.delete('/license');
+  return data;
+};
+
+// ============================================================
+// USERS
+// ============================================================
+
+export const getUsers = async () => {
+  const { data } = await apiClient.get('/users');
+  return data;
+};
+
+export const getUserStats = async () => {
+  const { data } = await apiClient.get('/users/stats');
+  return data;
+};
+
+export const createUser = async (user) => {
+  const { data } = await apiClient.post('/users', user);
+  return data;
+};
+
+export const updateUser = async (userId, updates) => {
+  const { data } = await apiClient.put(`/users/${userId}`, updates);
+  return data;
+};
+
+export const deleteUser = async (userId) => {
+  const { data } = await apiClient.delete(`/users/${userId}`);
+  return data;
+};
+
+export const toggleUser = async (userId) => {
+  const { data } = await apiClient.put(`/users/${userId}/toggle`);
   return data;
 };
 
@@ -290,8 +324,10 @@ export const resetContacts = async () => {
 // ============================================================
 
 export const changePassword = async (currentPassword, newPassword, confirmPassword) => {
-  const { data } = await apiClient.post('/auth/change-password', null, {
-    params: { current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword }
+  const { data } = await apiClient.post('/auth/change-password', {
+    currentPassword,
+    newPassword,
+    confirmPassword,
   });
   if (data.token) setToken(data.token);
   return data;

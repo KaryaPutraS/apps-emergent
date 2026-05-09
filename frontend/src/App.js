@@ -11,6 +11,7 @@ export const useApp = () => useContext(AppContext);
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [checking, setChecking] = useState(true);
@@ -20,7 +21,10 @@ function App() {
     const token = getToken();
     if (token) {
       checkSession()
-        .then(() => setIsLoggedIn(true))
+        .then((data) => {
+          setIsLoggedIn(true);
+          if (data.user) setCurrentUser(data.user);
+        })
         .catch(() => { clearToken(); })
         .finally(() => setChecking(false));
     } else {
@@ -28,11 +32,12 @@ function App() {
     }
   }, []);
 
-  const login = useCallback(async (password) => {
+  const login = useCallback(async (username, password) => {
     try {
-      const result = await apiLogin(password);
+      const result = await apiLogin(username, password);
       if (result.success) {
         setIsLoggedIn(true);
+        if (result.user) setCurrentUser(result.user);
       }
       return result;
     } catch (e) {
@@ -44,11 +49,14 @@ function App() {
     try { await apiLogout(); } catch (e) { /* ignore */ }
     clearToken();
     setIsLoggedIn(false);
+    setCurrentUser(null);
     setActiveTab('dashboard');
   }, []);
 
   const contextValue = {
     isLoggedIn,
+    currentUser,
+    setCurrentUser,
     activeTab,
     setActiveTab,
     sidebarOpen,
