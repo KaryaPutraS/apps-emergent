@@ -277,30 +277,7 @@ async def seed_defaults():
         await db.users.update_many({"role": "admin"}, {"$set": {"role": "superadmin"}})
         await db.users.update_many({"role": {"$in": ["operator", "viewer"]}}, {"$set": {"role": "user"}})
 
-    # Sample rules
-    if await db.rules.count_documents({}) == 0:
-        sample_rules = [
-            {"id": str(uuid.uuid4()), "priority": 1, "name": "Greeting", "triggerType": "contains", "triggerValue": "halo|hai|hello|hi|hey", "response": "Halo kak! Selamat datang. Ada yang bisa kami bantu?", "isActive": True, "hitCount": 0, "responseMode": "direct", "imageUrl": "", "imageCaption": "", "created_at": datetime.utcnow()},
-            {"id": str(uuid.uuid4()), "priority": 2, "name": "Menu", "triggerType": "contains", "triggerValue": "menu|daftar|harga|price", "response": "Berikut menu kami:\n- Espresso: 18k\n- Americano: 22k\n- Latte: 28k\n- Cappuccino: 28k", "isActive": True, "hitCount": 0, "responseMode": "ai_polish", "imageUrl": "", "imageCaption": "", "created_at": datetime.utcnow()},
-            {"id": str(uuid.uuid4()), "priority": 3, "name": "Jam Buka", "triggerType": "contains", "triggerValue": "buka|tutup|jam|operasional", "response": "Kami buka setiap hari, Senin-Minggu jam 08:00 - 21:00.", "isActive": True, "hitCount": 0, "responseMode": "direct", "imageUrl": "", "imageCaption": "", "created_at": datetime.utcnow()},
-        ]
-        await db.rules.insert_many(sample_rules)
-
-    # Sample knowledge
-    if await db.knowledge.count_documents({}) == 0:
-        sample_knowledge = [
-            {"id": str(uuid.uuid4()), "category": "Harga", "keyword": "harga|biaya|tarif|price", "content": "Espresso: Rp 18.000\nAmericano: Rp 22.000\nLatte: Rp 28.000\nCappuccino: Rp 28.000", "isActive": True, "created_at": datetime.utcnow()},
-            {"id": str(uuid.uuid4()), "category": "FAQ", "keyword": "parkir|wifi|toilet|mushola", "content": "Fasilitas: WiFi gratis, parkir luas, toilet bersih, mushola. Area smoking di outdoor.", "isActive": True, "created_at": datetime.utcnow()},
-        ]
-        await db.knowledge.insert_many(sample_knowledge)
-
-    # Sample templates
-    if await db.templates.count_documents({}) == 0:
-        sample_templates = [
-            {"id": str(uuid.uuid4()), "name": "Welcome Message", "category": "Greeting", "content": "Halo {nama}! Selamat datang. Ada yang bisa kami bantu hari ini?", "created_at": datetime.utcnow()},
-            {"id": str(uuid.uuid4()), "name": "Promo Bulanan", "category": "Marketing", "content": "Hai {nama}! Ada promo spesial bulan ini. Yuk mampir!", "created_at": datetime.utcnow()},
-        ]
-        await db.templates.insert_many(sample_templates)
+    # Sample rules - removed, use AI Setup to generate data
 
     # License default
     if await db.license.count_documents({}) == 0:
