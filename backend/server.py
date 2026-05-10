@@ -130,6 +130,9 @@ class ChangePasswordRequest(BaseModel):
     newPassword: str
     confirmPassword: str
 
+class WebhookPayload(BaseModel):
+    data: Optional[Dict] = None
+
 class DocSection(BaseModel):
     type: str = "text"  # text | step | image
     content: Optional[str] = ""
@@ -285,6 +288,7 @@ async def seed_defaults():
             "role": "superadmin",
             "isActive": True,
             "passwordHash": hashed,
+            "webhookToken": secrets.token_urlsafe(16),
             "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "lastLogin": None,
         })
@@ -292,6 +296,9 @@ async def seed_defaults():
         # Migrate existing admin roles to superadmin
         await db.users.update_many({"role": "admin"}, {"$set": {"role": "superadmin"}})
         await db.users.update_many({"role": {"$in": ["operator", "viewer"]}}, {"$set": {"role": "user"}})
+        # Migrate existing users missing webhookToken
+        async for u in db.users.find({"webhookToken": {"$exists": False}}):
+            await db.users.update_one({"id": u["id"]}, {"$set": {"webhookToken": secrets.token_urlsafe(16)}})
 
     # Sample rules - removed, use AI Setup to generate data
 
@@ -536,6 +543,7 @@ async def login(req: LoginRequest):
             {"$set": {"lastLogin": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}}
         )
         await add_log("LOGIN_SUCCESS", f"User '{username}' login berhasil")
+        await log_user_activity(str(user["id"]), username, "LOGIN", "Login berhasil")
         return LoginResponse(
             success=True,
             token=token,
@@ -552,6 +560,7 @@ async def login(req: LoginRequest):
     if username == "admin" and await verify_legacy_password(req.password):
         token = await create_session(user_id="admin", username="admin", role="superadmin", full_name="Administrator")
         await add_log("LOGIN_SUCCESS", "Admin login berhasil (legacy)")
+        await log_user_activity("admin", "admin", "LOGIN", "Login berhasil")
         return LoginResponse(
             success=True,
             token=token,
@@ -560,10 +569,12 @@ async def login(req: LoginRequest):
         )
 
     await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk: {username}")
+    await log_user_activity("unknown", username, "LOGIN_FAILED", "Password salah")
     return LoginResponse(success=False, message="Username atau password salah.")
 
 @api_router.post("/auth/logout")
 async def logout(current_user: Dict = Depends(get_current_user)):
+    await log_user_activity(current_user["userId"], current_user["username"], "LOGOUT", "Logout")
     await db.sessions.delete_one({"token": current_user["token"]})
     return {"success": True}
 
@@ -629,11 +640,13 @@ async def create_user(req: UserCreate, admin: Dict = Depends(require_superadmin)
             "role": req.role,
             "isActive": req.isActive,
             "passwordHash": hashed,
+            "webhookToken": secrets.token_urlsafe(16),
             "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "lastLogin": None,
         }
         await db.users.insert_one(user_doc)
         await add_log("USER_CREATED", f"User '{username}' ({req.role}) dibuat oleh '{admin['username']}'")
+        await log_user_activity(admin["userId"], admin["username"], "USER_CREATED", f"Membuat user '{username}' ({req.role})")
 
         user_doc.pop("_id", None)
         user_doc.pop("passwordHash", None)
@@ -680,6 +693,7 @@ async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(requi
         await db.users.update_one({"id": user_id}, {"$set": update_dict})
 
     await add_log("USER_UPDATED", f"User '{user['username']}' diupdate oleh '{admin['username']}'")
+    await log_user_activity(admin["userId"], admin["username"], "USER_UPDATED", f"Update user '{user['username']}'")
     updated = await db.users.find_one({"id": user_id}, {"_id": 0, "passwordHash": 0})
     return {"success": True, "user": updated}
 
@@ -700,6 +714,7 @@ async def delete_user(user_id: str, admin: Dict = Depends(require_superadmin)):
     await db.users.delete_one({"id": user_id})
     await db.sessions.delete_many({"userId": user_id})
     await add_log("USER_DELETED", f"User '{user['username']}' dihapus oleh '{admin['username']}'")
+    await log_user_activity(admin["userId"], admin["username"], "USER_DELETED", f"Menghapus user '{user['username']}'")
     return {"success": True}
 
 @api_router.put("/users/{user_id}/toggle")
@@ -718,7 +733,9 @@ async def toggle_user(user_id: str, admin: Dict = Depends(require_superadmin)):
     await db.users.update_one({"id": user_id}, {"$set": {"isActive": new_status}})
     if not new_status:
         await db.sessions.delete_many({"userId": user_id})
-    await add_log("USER_TOGGLED", f"User '{user['username']}' {'diaktifkan' if new_status else 'dinonaktifkan'}")
+    status_label = "diaktifkan" if new_status else "dinonaktifkan"
+    await add_log("USER_TOGGLED", f"User '{user['username']}' {status_label}")
+    await log_user_activity(admin["userId"], admin["username"], "USER_TOGGLED", f"User '{user['username']}' {status_label}")
     return {"success": True, "isActive": new_status}
 
 # ============================================================
@@ -790,7 +807,7 @@ async def get_config(token: str = Depends(validate_token)):
     return result
 
 @api_router.put("/config")
-async def update_config(req: ConfigUpdate, token: str = Depends(validate_token)):
+async def update_config(req: ConfigUpdate, current_user: Dict = Depends(get_current_user)):
     for key, value in req.updates.items():
         if key == "admin_password_hash":
             continue
@@ -800,6 +817,7 @@ async def update_config(req: ConfigUpdate, token: str = Depends(validate_token))
             upsert=True
         )
     await add_log("CONFIG_UPDATE", f"Config updated: {', '.join(req.updates.keys())}")
+    await log_user_activity(current_user["userId"], current_user["username"], "CONFIG_UPDATE", f"Update config: {', '.join(req.updates.keys())}")
     return {"success": True}
 
 @api_router.get("/config/ai-agent")
@@ -812,7 +830,7 @@ async def get_ai_agent_config(token: str = Depends(validate_token)):
     return result
 
 @api_router.put("/config/ai-agent")
-async def update_ai_agent_config(req: AIAgentConfig, token: str = Depends(validate_token)):
+async def update_ai_agent_config(req: AIAgentConfig, current_user: Dict = Depends(get_current_user)):
     updates = req.dict(exclude_none=True)
     for key, value in updates.items():
         await db.config.update_one(
@@ -821,6 +839,7 @@ async def update_ai_agent_config(req: AIAgentConfig, token: str = Depends(valida
             upsert=True
         )
     await add_log("AI_AGENT_UPDATE", f"AI Agent config updated: {', '.join(updates.keys())}")
+    await log_user_activity(current_user["userId"], current_user["username"], "AI_AGENT_UPDATE", f"Update AI Agent config")
     return {"success": True, "updated_keys": list(updates.keys())}
 
 # ============================================================
@@ -867,7 +886,7 @@ async def get_rules(token: str = Depends(validate_token)):
     return rules
 
 @api_router.post("/rules")
-async def save_rule(rule: RuleModel, token: str = Depends(validate_token)):
+async def save_rule(rule: RuleModel, current_user: Dict = Depends(get_current_user)):
     rule_dict = rule.dict()
     if not rule_dict.get("id"):
         rule_dict["id"] = str(uuid.uuid4())
@@ -876,19 +895,24 @@ async def save_rule(rule: RuleModel, token: str = Depends(validate_token)):
     existing = await db.rules.find_one({"id": rule_dict["id"]})
     if existing:
         await db.rules.update_one({"id": rule_dict["id"]}, {"$set": rule_dict})
+        action = "RULE_UPDATED"
     else:
         await db.rules.insert_one(rule_dict)
+        action = "RULE_CREATED"
 
     await add_log("RULE_SAVED", f"Rule '{rule_dict['name']}' disimpan")
+    await log_user_activity(current_user["userId"], current_user["username"], action, f"Rule '{rule_dict['name']}'")
     rule_dict.pop("_id", None)
     return {"success": True, "rule": rule_dict}
 
 @api_router.delete("/rules/{rule_id}")
-async def delete_rule(rule_id: str, token: str = Depends(validate_token)):
+async def delete_rule(rule_id: str, current_user: Dict = Depends(get_current_user)):
+    rule = await db.rules.find_one({"id": rule_id})
     result = await db.rules.delete_one({"id": rule_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Rule tidak ditemukan")
     await add_log("RULE_DELETED", f"Rule {rule_id} dihapus")
+    await log_user_activity(current_user["userId"], current_user["username"], "RULE_DELETED", f"Rule '{rule.get('name', rule_id)}' dihapus")
     return {"success": True}
 
 @api_router.put("/rules/{rule_id}/toggle")
@@ -910,7 +934,7 @@ async def get_knowledge(token: str = Depends(validate_token)):
     return items
 
 @api_router.post("/knowledge")
-async def save_knowledge(item: KnowledgeModel, token: str = Depends(validate_token)):
+async def save_knowledge(item: KnowledgeModel, current_user: Dict = Depends(get_current_user)):
     item_dict = item.dict()
     if not item_dict.get("id"):
         item_dict["id"] = str(uuid.uuid4())
@@ -919,19 +943,24 @@ async def save_knowledge(item: KnowledgeModel, token: str = Depends(validate_tok
     existing = await db.knowledge.find_one({"id": item_dict["id"]})
     if existing:
         await db.knowledge.update_one({"id": item_dict["id"]}, {"$set": item_dict})
+        action = "KNOWLEDGE_UPDATED"
     else:
         await db.knowledge.insert_one(item_dict)
+        action = "KNOWLEDGE_CREATED"
 
     await add_log("KNOWLEDGE_SAVED", f"Knowledge '{item_dict['category']}' disimpan")
+    await log_user_activity(current_user["userId"], current_user["username"], action, f"Knowledge '{item_dict['keyword']}' ({item_dict['category']})")
     item_dict.pop("_id", None)
     return {"success": True, "item": item_dict}
 
 @api_router.delete("/knowledge/{item_id}")
-async def delete_knowledge(item_id: str, token: str = Depends(validate_token)):
+async def delete_knowledge(item_id: str, current_user: Dict = Depends(get_current_user)):
+    item = await db.knowledge.find_one({"id": item_id})
     result = await db.knowledge.delete_one({"id": item_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Knowledge tidak ditemukan")
     await add_log("KNOWLEDGE_DELETED", f"Knowledge {item_id} dihapus")
+    await log_user_activity(current_user["userId"], current_user["username"], "KNOWLEDGE_DELETED", f"Knowledge '{item.get('keyword', item_id)}' dihapus")
     return {"success": True}
 
 # ============================================================
@@ -1030,7 +1059,7 @@ async def check_broadcast(req: BroadcastCheck, token: str = Depends(validate_tok
     return {"count": count}
 
 @api_router.post("/broadcast/send")
-async def send_broadcast(req: BroadcastSend, token: str = Depends(validate_token)):
+async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_current_user)):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong")
 
@@ -1061,6 +1090,7 @@ async def send_broadcast(req: BroadcastSend, token: str = Depends(validate_token
             "tokensUsed": 0
         })
 
+    await log_user_activity(current_user["userId"], current_user["username"], "BROADCAST_SENT", f"Broadcast ke {count} kontak")
     return {"success": True, "sent": count}
 
 # ============================================================
@@ -1077,6 +1107,15 @@ async def add_log(log_type: str, message: str):
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "type": log_type,
         "message": message
+    })
+
+async def log_user_activity(user_id: str, username: str, action: str, detail: str = ""):
+    await db.user_activity.insert_one({
+        "userId": user_id,
+        "username": username,
+        "action": action,
+        "detail": detail,
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
 # ============================================================
@@ -1315,6 +1354,42 @@ async def upload_doc_image(req: ImageUpload, admin: Dict = Depends(require_super
     image_id = str(uuid.uuid4())
     await db.doc_images.insert_one({"id": image_id, "dataUrl": req.dataUrl, "createdAt": datetime.utcnow().isoformat()})
     return {"success": True, "imageId": image_id, "dataUrl": req.dataUrl}
+
+# ============================================================
+# WEBHOOK TOKEN & USER ACTIVITY
+# ============================================================
+
+@api_router.post("/users/{user_id}/regenerate-token")
+async def regenerate_webhook_token(user_id: str, admin: Dict = Depends(require_superadmin)):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+    new_token = secrets.token_urlsafe(16)
+    await db.users.update_one({"id": user_id}, {"$set": {"webhookToken": new_token}})
+    await log_user_activity(admin["userId"], admin["username"], "TOKEN_REGENERATED", f"Webhook token user '{user['username']}' diperbarui")
+    return {"success": True, "webhookToken": new_token}
+
+@api_router.get("/admin/user-activity")
+async def get_all_user_activity(limit: int = 100, user_id: str = None, admin: Dict = Depends(require_superadmin)):
+    query = {}
+    if user_id:
+        query["userId"] = user_id
+    activities = await db.user_activity.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    return activities
+
+@api_router.get("/admin/user-activity/{user_id}")
+async def get_user_activity(user_id: str, limit: int = 50, admin: Dict = Depends(require_superadmin)):
+    activities = await db.user_activity.find({"userId": user_id}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    return activities
+
+@app.post("/webhook/{token}")
+async def receive_webhook(token: str, payload: Dict = None):
+    user = await db.users.find_one({"webhookToken": token, "isActive": True}, {"_id": 0, "passwordHash": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Webhook token tidak valid.")
+    await log_user_activity(user["id"], user["username"], "WEBHOOK_RECEIVED", f"Webhook diterima")
+    await add_log("WEBHOOK_IN", f"Webhook masuk untuk user '{user['username']}'")
+    return {"success": True, "userId": user["id"], "username": user["username"]}
 
 # ============================================================
 # HEALTH CHECK

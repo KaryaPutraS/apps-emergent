@@ -163,6 +163,18 @@ export const toggleUser = async (userId) => {
   return data;
 };
 
+export const regenerateWebhookToken = async (userId) => {
+  const { data } = await apiClient.post(`/users/${userId}/regenerate-token`);
+  return data;
+};
+
+export const getAllUserActivity = async (userId = null, limit = 100) => {
+  const params = { limit };
+  if (userId) params.user_id = userId;
+  const { data } = await apiClient.get('/admin/user-activity', { params });
+  return data;
+};
+
 // ============================================================
 // RULES
 // ============================================================

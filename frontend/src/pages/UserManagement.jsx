@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../App';
 import {
-  getUsers, getUserStats, createUser, updateUser, deleteUser, toggleUser
+  getUsers, getUserStats, createUser, updateUser, deleteUser, toggleUser,
+  regenerateWebhookToken, getAllUserActivity
 } from '../api/apiClient';
 import { toast } from 'sonner';
 import {
   UserCog, UserPlus, Pencil, Trash2, ToggleLeft, ToggleRight,
   ShieldCheck, Users, UserCheck, UserX, Eye, EyeOff, X, Save,
-  RefreshCw, Search, Crown, Briefcase
+  RefreshCw, Search, Crown, Briefcase, Link, Copy, RotateCw,
+  Activity, LogIn, LogOut, Settings, GitBranch, BookOpen, Radio,
+  ChevronDown, Filter, Clock
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -271,8 +274,50 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
   );
 };
 
+// ─── action label map ────────────────────────────────────────
+const ACTION_CONFIG = {
+  LOGIN:              { label: 'Login',            icon: LogIn,     color: 'text-emerald-600 bg-emerald-50' },
+  LOGIN_FAILED:       { label: 'Login Gagal',      icon: LogIn,     color: 'text-red-600 bg-red-50' },
+  LOGOUT:             { label: 'Logout',           icon: LogOut,    color: 'text-slate-600 bg-slate-100' },
+  CONFIG_UPDATE:      { label: 'Update Config',    icon: Settings,  color: 'text-blue-600 bg-blue-50' },
+  AI_AGENT_UPDATE:    { label: 'Update AI Agent',  icon: Settings,  color: 'text-purple-600 bg-purple-50' },
+  RULE_CREATED:       { label: 'Buat Rule',        icon: GitBranch, color: 'text-indigo-600 bg-indigo-50' },
+  RULE_UPDATED:       { label: 'Edit Rule',        icon: GitBranch, color: 'text-indigo-600 bg-indigo-50' },
+  RULE_DELETED:       { label: 'Hapus Rule',       icon: GitBranch, color: 'text-red-600 bg-red-50' },
+  KNOWLEDGE_CREATED:  { label: 'Tambah Knowledge', icon: BookOpen,  color: 'text-teal-600 bg-teal-50' },
+  KNOWLEDGE_UPDATED:  { label: 'Edit Knowledge',   icon: BookOpen,  color: 'text-teal-600 bg-teal-50' },
+  KNOWLEDGE_DELETED:  { label: 'Hapus Knowledge',  icon: BookOpen,  color: 'text-red-600 bg-red-50' },
+  BROADCAST_SENT:     { label: 'Broadcast',        icon: Radio,     color: 'text-amber-600 bg-amber-50' },
+  TOKEN_REGENERATED:  { label: 'Regenerate Token', icon: RotateCw,  color: 'text-orange-600 bg-orange-50' },
+  USER_CREATED:       { label: 'Buat User',        icon: UserPlus,  color: 'text-emerald-600 bg-emerald-50' },
+  USER_UPDATED:       { label: 'Edit User',        icon: Pencil,    color: 'text-blue-600 bg-blue-50' },
+  USER_DELETED:       { label: 'Hapus User',       icon: Trash2,    color: 'text-red-600 bg-red-50' },
+  USER_TOGGLED:       { label: 'Toggle User',      icon: ToggleRight, color: 'text-amber-600 bg-amber-50' },
+  WEBHOOK_RECEIVED:   { label: 'Webhook Masuk',    icon: Link,      color: 'text-cyan-600 bg-cyan-50' },
+};
+
+const ActivityRow = ({ item }) => {
+  const cfg = ACTION_CONFIG[item.action] || { label: item.action, icon: Clock, color: 'text-slate-600 bg-slate-100' };
+  const Icon = cfg.icon;
+  return (
+    <tr className="hover:bg-slate-50 transition-colors">
+      <td className="px-4 py-2.5 text-xs text-slate-400 whitespace-nowrap">{item.timestamp}</td>
+      <td className="px-4 py-2.5">
+        <span className="font-medium text-slate-700 text-sm">@{item.username}</span>
+      </td>
+      <td className="px-4 py-2.5">
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${cfg.color}`}>
+          <Icon className="w-3 h-3" />{cfg.label}
+        </span>
+      </td>
+      <td className="px-4 py-2.5 text-xs text-slate-500 max-w-xs truncate">{item.detail}</td>
+    </tr>
+  );
+};
+
 const UserManagement = () => {
   const { currentUser } = useApp();
+  const [activeTab, setActiveTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -281,6 +326,11 @@ const UserManagement = () => {
   const [showModal, setShowModal] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
+  const [regeneratingId, setRegeneratingId] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [filterUser, setFilterUser] = useState('');
+  const [expandedWebhook, setExpandedWebhook] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -329,12 +379,44 @@ const UserManagement = () => {
     }
   };
 
+  const handleRegenerateToken = async (u) => {
+    if (!window.confirm(`Regenerate webhook token untuk "${u.username}"? Token lama akan tidak berlaku.`)) return;
+    setRegeneratingId(u.id);
+    try {
+      const res = await regenerateWebhookToken(u.id);
+      toast.success('Webhook token berhasil diperbarui');
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, webhookToken: res.webhookToken } : x));
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal regenerate token');
+    } finally {
+      setRegeneratingId(null);
+    }
+  };
+
+  const loadActivity = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const data = await getAllUserActivity(null, 200);
+      setActivities(data);
+    } catch {
+      toast.error('Gagal memuat aktivitas');
+    } finally {
+      setActivityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'activity') loadActivity();
+  }, [activeTab, loadActivity]);
+
   const filtered = users.filter(u =>
     u.username?.toLowerCase().includes(search.toLowerCase()) ||
     u.fullName?.toLowerCase().includes(search.toLowerCase()) ||
     u.email?.toLowerCase().includes(search.toLowerCase()) ||
     u.role?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const webhookBase = `${window.location.protocol}//${window.location.host}/webhook/`;
 
   return (
     <div className="space-y-6">
@@ -345,23 +427,32 @@ const UserManagement = () => {
           <p className="text-sm text-slate-500 mt-1">Manajemen akun pengguna dan hak akses sistem</p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={load}
-            disabled={loading}
-            className="gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <Button variant="outline" onClick={activeTab === 'users' ? load : loadActivity} disabled={loading || activityLoading} className="gap-2">
+            <RefreshCw className={`w-4 h-4 ${loading || activityLoading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button
-            onClick={openAdd}
-            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-          >
-            <UserPlus className="w-4 h-4" />
-            Tambah User
-          </Button>
+          {activeTab === 'users' && (
+            <Button onClick={openAdd} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white">
+              <UserPlus className="w-4 h-4" />
+              Tambah User
+            </Button>
+          )}
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit">
+        {[
+          { id: 'users', label: 'Kelola User', icon: Users },
+          { id: 'activity', label: 'Log Aktivitas', icon: Activity },
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}>
+            <tab.icon className="w-4 h-4" />{tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Stats */}
@@ -393,8 +484,53 @@ const UserManagement = () => {
         </div>
       </div>
 
-      {/* Search + Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      {/* ── TAB: LOG AKTIVITAS ── */}
+      {activeTab === 'activity' && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+            <Activity className="w-4 h-4 text-emerald-600" />
+            <span className="font-semibold text-slate-800 text-sm">Log Aktivitas User</span>
+            <div className="ml-auto flex items-center gap-2">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <select value={filterUser} onChange={e => setFilterUser(e.target.value)}
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <option value="">Semua User</option>
+                {users.map(u => <option key={u.id} value={u.id}>@{u.username}</option>)}
+              </select>
+            </div>
+          </div>
+          {activityLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Waktu</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">User</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Aksi</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">Detail</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {activities
+                    .filter(a => !filterUser || a.userId === filterUser)
+                    .map((item, i) => <ActivityRow key={i} item={item} />)
+                  }
+                  {activities.filter(a => !filterUser || a.userId === filterUser).length === 0 && (
+                    <tr><td colSpan={4} className="text-center py-10 text-slate-400 text-sm">Belum ada aktivitas tercatat</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: KELOLA USER ── */}
+      {activeTab === 'users' && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -427,7 +563,7 @@ const UserManagement = () => {
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">User</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Email</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Webhook URL</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Login Terakhir</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Aksi</th>
@@ -463,8 +599,18 @@ const UserManagement = () => {
                           {roleCfg.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
-                        {u.email || <span className="text-slate-300">—</span>}
+                      <td className="px-4 py-3 hidden md:table-cell">
+                        {u.webhookToken ? (
+                          <div className="flex items-center gap-1.5">
+                            <code className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 max-w-[140px] truncate block">
+                              {webhookBase}{u.webhookToken}
+                            </code>
+                            <button onClick={() => { navigator.clipboard.writeText(`${webhookBase}${u.webhookToken}`); toast.success('URL disalin'); }}
+                              className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors flex-shrink-0" title="Salin URL">
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : <span className="text-slate-300 text-xs">—</span>}
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-xs hidden lg:table-cell">
                         {u.lastLogin || <span className="text-slate-300">Belum pernah</span>}
@@ -502,6 +648,19 @@ const UserManagement = () => {
                             }
                           </button>
 
+                          {/* Regenerate Token */}
+                          <button
+                            onClick={() => handleRegenerateToken(u)}
+                            disabled={regeneratingId === u.id}
+                            title="Regenerate webhook token"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-orange-600 hover:bg-orange-50 transition-colors"
+                          >
+                            {regeneratingId === u.id
+                              ? <span className="w-4 h-4 border-2 border-orange-300 border-t-orange-600 rounded-full animate-spin block" />
+                              : <RotateCw className="w-4 h-4" />
+                            }
+                          </button>
+
                           {/* Edit */}
                           <button
                             onClick={() => openEdit(u)}
@@ -536,7 +695,7 @@ const UserManagement = () => {
             </table>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Modal */}
       {showModal && (
