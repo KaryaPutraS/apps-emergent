@@ -365,6 +365,16 @@ export const stopWahaSession = async () => {
   return data;
 };
 
+export const getWahaWebhook = async () => {
+  const { data } = await apiClient.get('/waha/webhook');
+  return data;
+};
+
+export const setWahaWebhook = async () => {
+  const { data } = await apiClient.post('/waha/webhook');
+  return data;
+};
+
 // ============================================================
 // RESET
 // ============================================================

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession } from '../api/apiClient';
+import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession, getWahaWebhook, setWahaWebhook } from '../api/apiClient';
 import {
   Copy, Save, Search, Wifi, Brain, Globe, QrCode,
   Smartphone, RefreshCw, Play, Square, CheckCircle2,
-  AlertCircle, Loader2, Eye, EyeOff, Unplug
+  AlertCircle, Loader2, Eye, EyeOff, Unplug, Webhook, Zap, Link2
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -290,6 +290,9 @@ const Connections = () => {
   const [ollamaUrl, setOllamaUrl] = useState('');
   const [wahaConfigured, setWahaConfigured] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
+  const [backendUrl, setBackendUrl] = useState('');
+  const [webhookStatus, setWebhookStatus] = useState(null); // null | 'loading' | 'set' | 'none'
+  const [settingWebhook, setSettingWebhook] = useState(false);
 
   useEffect(() => {
     getConfig().then(data => {
@@ -299,21 +302,48 @@ const Connections = () => {
       setWahaSession(data.wahaSession || 'default');
       setWahaApiKey(data.wahaApiKey || '');
       setOllamaUrl(data.ollamaUrl || '');
+      setBackendUrl(data.backendUrl || '');
       setWahaConfigured(!!data.wahaUrl);
-      // Build webhook URL from current page origin + backend path
-      const base = data.wahaUrl ? new URL(data.wahaUrl).origin : window.location.origin;
-      setWebhookUrl(`${window.location.origin}/webhook/YOUR_TOKEN`);
+      const bUrl = (data.backendUrl || window.location.origin).replace(/\/$/, '');
+      setWebhookUrl(`${bUrl}/webhook/YOUR_TOKEN`);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
   const handleSaveWaha = async () => {
     try {
-      await updateConfig({ wahaUrl, wahaSession, wahaApiKey });
+      await updateConfig({ wahaUrl, wahaSession, wahaApiKey, backendUrl });
       setWahaConfigured(!!wahaUrl);
+      const bUrl = (backendUrl || window.location.origin).replace(/\/$/, '');
+      setWebhookUrl(`${bUrl}/webhook/YOUR_TOKEN`);
       toast.success('Konfigurasi WAHA tersimpan!');
     } catch {
       toast.error('Gagal menyimpan konfigurasi.');
+    }
+  };
+
+  const handleCheckWebhook = async () => {
+    setWebhookStatus('loading');
+    try {
+      const d = await getWahaWebhook();
+      setWebhookStatus(d.webhooks?.length > 0 ? 'set' : 'none');
+    } catch {
+      setWebhookStatus('none');
+    }
+  };
+
+  const handleSetWebhook = async () => {
+    if (!backendUrl) { toast.error('Isi Backend URL terlebih dahulu, lalu Simpan.'); return; }
+    setSettingWebhook(true);
+    try {
+      const d = await setWahaWebhook();
+      toast.success('Webhook berhasil dipasang di WAHA!');
+      setWebhookStatus('set');
+      setWebhookUrl(d.webhookUrl || webhookUrl);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal memasang webhook.');
+    } finally {
+      setSettingWebhook(false);
     }
   };
 
@@ -372,13 +402,88 @@ const Connections = () => {
         </div>
       </div>
 
-      {/* ── Webhook URL ── */}
+      {/* ── Webhook Setup ── */}
+      {wahaConfigured && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50">
+            <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center">
+              <Zap className="w-4 h-4 text-violet-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-900 text-sm">Webhook Otomatis</h3>
+              <p className="text-xs text-slate-500">Pasang webhook ke WAHA tanpa membuka dashboard WAHA</p>
+            </div>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {/* Webhook URL preview */}
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-1.5">URL webhook yang akan dipasang:</p>
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <Link2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                <code className="text-xs font-mono text-slate-600 flex-1 break-all">
+                  {backendUrl
+                    ? `${backendUrl.replace(/\/$/, '')}/webhook/[token-user]`
+                    : <span className="text-slate-400 italic">Isi Backend URL di konfigurasi WAHA dahulu</span>
+                  }
+                </code>
+              </div>
+            </div>
+
+            {/* Webhook status */}
+            {webhookStatus === 'set' && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                <p className="text-sm text-emerald-700 font-medium">Webhook sudah terpasang di WAHA</p>
+              </div>
+            )}
+            {webhookStatus === 'none' && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                <p className="text-sm text-amber-700">Webhook belum terpasang di WAHA</p>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={handleSetWebhook}
+                disabled={settingWebhook || !backendUrl}
+                className="bg-violet-600 hover:bg-violet-700 text-white gap-2"
+              >
+                {settingWebhook
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Zap className="w-4 h-4" />
+                }
+                Pasang Webhook Otomatis
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleCheckWebhook}
+                disabled={webhookStatus === 'loading'}
+                className="gap-2"
+              >
+                {webhookStatus === 'loading'
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Search className="w-4 h-4" />
+                }
+                Cek Status Webhook
+              </Button>
+            </div>
+            <p className="text-xs text-slate-400">
+              Pastikan session WhatsApp sudah aktif sebelum memasang webhook.
+              Webhook akan menerima semua pesan masuk dan mengirimkannya ke chatbot.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Webhook URL (manual) ── */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-2">
-          <Globe className="w-4 h-4 text-emerald-500" /> Webhook URL
+          <Globe className="w-4 h-4 text-emerald-500" /> Webhook URL (Manual)
         </h3>
         <p className="text-sm text-slate-500 mb-3">
-          Salin URL ini dan setel sebagai webhook di WAHA Anda. Ganti <code className="text-xs bg-slate-100 px-1 rounded">YOUR_TOKEN</code> dengan token user yang ada di halaman Kelola User.
+          Jika ingin set manual di WAHA, salin URL di bawah. Ganti <code className="text-xs bg-slate-100 px-1 rounded">YOUR_TOKEN</code> dengan token user dari halaman Kelola User.
         </p>
         <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
           <code className="text-xs font-mono text-slate-600 flex-1 break-all">{webhookUrl}</code>
@@ -413,15 +518,23 @@ const Connections = () => {
               placeholder="X-Api-Key dari WAHA"
               className="pr-10"
             />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
+            <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
               {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
           <p className="text-xs text-slate-400 mt-1">Kosongkan jika WAHA tidak menggunakan autentikasi</p>
+        </div>
+        <div className="mt-4">
+          <label className="text-sm font-medium text-slate-700 block mb-1.5">
+            Backend URL Publik
+            <span className="ml-1.5 text-xs font-normal text-slate-400">(untuk webhook)</span>
+          </label>
+          <Input
+            value={backendUrl}
+            onChange={(e) => setBackendUrl(e.target.value)}
+            placeholder="https://yourdomain.com"
+          />
+          <p className="text-xs text-slate-400 mt-1">URL publik server ini — digunakan WAHA untuk mengirim pesan masuk ke dashboard</p>
         </div>
         <div className="flex gap-2 mt-4">
           <Button onClick={handleSaveWaha} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">

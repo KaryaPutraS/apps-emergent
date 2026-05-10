@@ -254,6 +254,7 @@ async def seed_defaults():
             {"key": "wahaUrl", "value": ""},
             {"key": "wahaSession", "value": "default"},
             {"key": "wahaApiKey", "value": ""},
+            {"key": "backendUrl", "value": ""},
             {"key": "aiProvider", "value": ""},
             {"key": "aiModel", "value": ""},
             {"key": "hasAiApiKey", "value": False},
@@ -1525,6 +1526,87 @@ async def waha_stop(token: str = Depends(validate_token)):
             if r.status_code not in (200, 201, 404):
                 r.raise_for_status()
         return {"success": True, "message": "Session dihentikan."}
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@api_router.get("/waha/webhook")
+async def waha_get_webhook(current_user: Dict = Depends(get_current_user)):
+    waha_url, session, api_key = await get_waha_config()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Try WAHA Plus style first: GET /api/sessions/{session}
+            r = await client.get(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
+            if r.status_code == 200:
+                data = r.json()
+                webhooks = data.get("config", {}).get("webhooks", [])
+                if webhooks:
+                    return {"success": True, "webhooks": webhooks}
+            # Fallback: GET /api/{session}/webhook
+            r2 = await client.get(f"{waha_url}/api/{session}/webhook", headers=waha_headers(api_key))
+            if r2.status_code == 200:
+                return {"success": True, "webhooks": [r2.json()]}
+        return {"success": True, "webhooks": []}
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@api_router.post("/waha/webhook")
+async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
+    waha_url, session, api_key = await get_waha_config()
+
+    # Get user's webhook token
+    user = await db.users.find_one({"id": current_user["userId"]})
+    if not user or not user.get("webhookToken"):
+        raise HTTPException(status_code=400, detail="Token webhook user tidak ditemukan.")
+
+    # Get backend public URL
+    backend_url_doc = await db.config.find_one({"key": "backendUrl"})
+    backend_url = (backend_url_doc["value"] if backend_url_doc else "").rstrip("/")
+    if not backend_url:
+        raise HTTPException(status_code=400, detail="Backend URL belum dikonfigurasi.")
+
+    webhook_url = f"{backend_url}/webhook/{user['webhookToken']}"
+    events = ["message", "message.any", "session.status", "message.reaction"]
+
+    errors = []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Try WAHA Plus: PATCH /api/sessions/{session}
+            r = await client.patch(
+                f"{waha_url}/api/sessions/{session}",
+                json={"config": {"webhooks": [{"url": webhook_url, "events": events}]}},
+                headers=waha_headers(api_key),
+            )
+            if r.status_code in (200, 201):
+                return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"PATCH sessions: {r.status_code}")
+
+            # Fallback: PUT /api/{session}/webhook
+            r2 = await client.put(
+                f"{waha_url}/api/{session}/webhook",
+                json={"url": webhook_url, "events": events},
+                headers=waha_headers(api_key),
+            )
+            if r2.status_code in (200, 201):
+                return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"PUT webhook: {r2.status_code}")
+
+            # Fallback: POST /api/{session}/config/webhook
+            r3 = await client.post(
+                f"{waha_url}/api/{session}/config/webhook",
+                json={"url": webhook_url, "events": events},
+                headers=waha_headers(api_key),
+            )
+            if r3.status_code in (200, 201):
+                return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"POST config/webhook: {r3.status_code}")
+
+        raise HTTPException(status_code=502, detail=f"WAHA tidak mendukung endpoint webhook yang dicoba: {'; '.join(errors)}")
+    except HTTPException:
+        raise
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
     except Exception as e:
