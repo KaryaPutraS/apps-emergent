@@ -247,71 +247,89 @@ async def require_superadmin(current_user: Dict = Depends(get_current_user)) -> 
 # ============================================================
 
 async def seed_defaults():
-    # Step 1: Clean up duplicate (key, userId) combos FIRST (must be before unique index)
-    pipeline = [{"$group": {"_id": {"key": "$key", "userId": "$userId"}, "count": {"$sum": 1}, "ids": {"$push": "$_id"}}}]
-    async for grp in db.config.aggregate(pipeline):
-        if grp["count"] > 1:
-            docs = await db.config.find({"_id": {"$in": grp["ids"]}}).to_list(20)
-            docs_sorted = sorted(docs, key=lambda d: len(str(d.get("value", "") or "")), reverse=True)
-            ids_to_delete = [d["_id"] for d in docs_sorted[1:]]
-            await db.config.delete_many({"_id": {"$in": ids_to_delete}})
-
-    # Step 2: Migrate old global configs (no userId) to userId=""
-    await db.config.update_many({"userId": {"$exists": False}}, {"$set": {"userId": ""}})
-
-    # Step 3: Now safe to create compound unique index
+    # ── Selalu dibungkus try/except agar backend tidak crash saat startup ──
     try:
-        await db.config.drop_index("key_1")
-    except Exception:
-        pass
-    await db.config.create_index([("key", 1), ("userId", 1)], unique=True)
+        # Step 1: Migrate old configs without userId → userId=""
+        await db.config.update_many({"userId": {"$exists": False}}, {"$set": {"userId": ""}})
 
-    # Ensure global default keys exist (userId="" = shared defaults, never overwrite user-specific)
-    required_defaults = [
-        ("wahaUrl", ""), ("wahaSession", "default"), ("wahaApiKey", ""),
-        ("backendUrl", ""), ("aiProvider", ""), ("aiModel", ""),
-        ("aiApiKey", ""), ("ollamaUrl", ""), ("systemPrompt", ""),
-        ("businessInfo", ""), ("aiTemperature", 0.7), ("aiMaxTokens", 500),
-        ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
-        ("ruleAiEnabled", False), ("isBotActive", False),
-        ("messageRetentionDays", 90),
-    ]
-    for key, default_val in required_defaults:
-        await db.config.update_one(
-            {"key": key, "userId": ""},
-            {"$setOnInsert": {"key": key, "userId": "", "value": default_val}},
-            upsert=True,
-        )
+        # Step 2: Dedup (key, userId) pairs — keep doc with longest value
+        pipeline = [{"$group": {"_id": {"key": "$key", "userId": "$userId"}, "count": {"$sum": 1}, "ids": {"$push": "$_id"}}}]
+        async for grp in db.config.aggregate(pipeline):
+            if grp["count"] > 1:
+                docs = await db.config.find({"_id": {"$in": grp["ids"]}}).to_list(20)
+                docs_sorted = sorted(docs, key=lambda d: len(str(d.get("value", "") or "")), reverse=True)
+                ids_to_delete = [d["_id"] for d in docs_sorted[1:]]
+                await db.config.delete_many({"_id": {"$in": ids_to_delete}})
 
-    # Legacy migration: old deployments used hasWahaApiKey/hasAiApiKey, remove them
-    await db.config.delete_many({"key": {"$in": ["hasWahaApiKey", "hasAiApiKey"]}})
+        # Step 3: Drop old single-key index if exists, then create compound unique index
+        for old_idx in ["key_1", "key_1_userId_1"]:
+            try:
+                await db.config.drop_index(old_idx)
+            except Exception:
+                pass
+        try:
+            await db.config.create_index([("key", 1), ("userId", 1)], unique=True, name="key_userId_unique")
+        except Exception as e:
+            print(f"[seed] WARNING: could not create config index: {e}")
 
-    # Migrate rules/knowledge/templates without userId → assign to first regular user
-    first_user = await db.users.find_one({"role": {"$ne": "superadmin"}})
-    if first_user:
-        first_uid = str(first_user["id"])
-        await db.rules.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
-        await db.knowledge.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
-        await db.templates.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
-        await db.contacts.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
-        await db.messages.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
-        # Also copy global config (userId="") to user-specific if user has no config yet
-        user_config_count = await db.config.count_documents({"userId": first_uid})
-        if user_config_count == 0:
-            global_docs = await db.config.find({"userId": ""}).to_list(200)
-            for doc in global_docs:
+        # Step 4: Ensure global defaults exist (userId="" = global fallback)
+        required_defaults = [
+            ("wahaUrl", ""), ("wahaSession", "default"), ("wahaApiKey", ""),
+            ("backendUrl", ""), ("aiProvider", ""), ("aiModel", ""),
+            ("aiApiKey", ""), ("ollamaUrl", ""), ("systemPrompt", ""),
+            ("businessInfo", ""), ("aiTemperature", 0.7), ("aiMaxTokens", 500),
+            ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
+            ("ruleAiEnabled", False), ("isBotActive", False),
+            ("messageRetentionDays", 90),
+        ]
+        for key, default_val in required_defaults:
+            try:
+                await db.config.update_one(
+                    {"key": key, "userId": ""},
+                    {"$setOnInsert": {"key": key, "userId": "", "value": default_val}},
+                    upsert=True,
+                )
+            except Exception:
+                pass
+
+        # Step 5: Legacy cleanup
+        await db.config.delete_many({"key": {"$in": ["hasWahaApiKey", "hasAiApiKey"]}})
+
+        # Step 6: Migrate legacy data (no userId) to first regular user
+        first_user = await db.users.find_one({"role": {"$ne": "superadmin"}})
+        if first_user:
+            first_uid = str(first_user["id"])
+            for coll in [db.rules, db.knowledge, db.templates, db.contacts, db.messages]:
                 try:
-                    await db.config.insert_one({
-                        "key": doc["key"],
-                        "userId": first_uid,
-                        "value": doc.get("value", ""),
-                        "updated_at": datetime.utcnow(),
-                    })
+                    await coll.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
                 except Exception:
-                    pass  # already exists
+                    pass
+            # Copy global config to user-specific if user has none yet
+            try:
+                user_config_count = await db.config.count_documents({"userId": first_uid})
+                if user_config_count == 0:
+                    global_docs = await db.config.find({"userId": ""}).to_list(200)
+                    for doc in global_docs:
+                        try:
+                            await db.config.insert_one({
+                                "key": doc["key"],
+                                "userId": first_uid,
+                                "value": doc.get("value", ""),
+                                "updated_at": datetime.utcnow(),
+                            })
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
-    # Create unique index on processed_msgs for atomic deduplication
-    await db.processed_msgs.create_index("msgId", unique=True, sparse=True)
+        # Step 7: Unique index on processed_msgs for dedup atomicity
+        try:
+            await db.processed_msgs.create_index("msgId", unique=True, sparse=True)
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"[seed] ERROR in seed_defaults (non-fatal): {e}")
 
 
     # Seed default superadmin user in users collection
