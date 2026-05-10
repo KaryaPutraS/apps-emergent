@@ -313,11 +313,15 @@ const Connections = () => {
       setWahaUrl(data.wahaUrl || '');
       setWahaSession(data.wahaSession || 'default');
       setWahaApiKey(data.wahaApiKey || '');
+      setAiApiKey(data.aiApiKey || '');
       setOllamaUrl(data.ollamaUrl || '');
       setBackendUrl(data.backendUrl || '');
       setWahaConfigured(!!data.wahaUrl);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch((err) => {
+      toast.error('Gagal memuat konfigurasi. Coba refresh halaman.');
+      setLoading(false);
+    });
   }, []);
 
   const handleSaveWaha = async () => {
@@ -368,21 +372,18 @@ const Connections = () => {
   };
 
   const handleTestWaha = async () => {
-    if (!wahaUrl) { toast.error('Isi WAHA URL terlebih dahulu.'); return; }
+    if (!wahaUrl) { toast.error('Isi WAHA URL terlebih dahulu dan simpan terlebih dahulu.'); return; }
     try {
-      const { getWahaStatus: _s } = await import('../api/apiClient');
       toast.info('Mengecek koneksi WAHA…');
       const d = await getWahaStatus();
       toast.success(`WAHA terhubung! Status session: ${d.status}`);
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Gagal terhubung ke WAHA.');
+      toast.error(err.response?.data?.detail || 'Gagal terhubung ke WAHA. Pastikan URL sudah disimpan.');
     }
   };
 
   const handleSaveAI = async () => {
-    const updates = { aiProvider: provider, aiModel: model };
-    if (aiApiKey) updates.aiApiKey = aiApiKey;
-    if (ollamaUrl) updates.ollamaUrl = ollamaUrl;
+    const updates = { aiProvider: provider, aiModel: model, aiApiKey, ollamaUrl };
     try {
       await updateConfig(updates);
       toast.success('Konfigurasi AI tersimpan!');
@@ -573,7 +574,10 @@ const Connections = () => {
               {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          <p className="text-xs text-slate-400 mt-1">Kosongkan jika WAHA tidak menggunakan autentikasi</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Kosongkan jika WAHA tidak menggunakan autentikasi
+            {wahaApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
+          </p>
         </div>
         <div className="mt-4">
           <label className="text-sm font-medium text-slate-700 block mb-1.5">
@@ -648,7 +652,10 @@ const Connections = () => {
               {showAiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-          <p className="text-xs text-slate-400 mt-1">API Key dari provider AI Anda</p>
+          <p className="text-xs text-slate-400 mt-1">
+            API Key dari provider AI Anda
+            {aiApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
+          </p>
         </div>
         <div className="flex gap-2 mt-4">
           <Button onClick={handleSaveAI} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
