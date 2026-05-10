@@ -247,8 +247,8 @@ async def require_superadmin(current_user: Dict = Depends(get_current_user)) -> 
 # ============================================================
 
 async def seed_defaults():
-    # Step 1: Clean up duplicate config keys FIRST (must be before unique index)
-    pipeline = [{"$group": {"_id": "$key", "count": {"$sum": 1}, "ids": {"$push": "$_id"}}}]
+    # Step 1: Clean up duplicate (key, userId) combos FIRST (must be before unique index)
+    pipeline = [{"$group": {"_id": {"key": "$key", "userId": "$userId"}, "count": {"$sum": 1}, "ids": {"$push": "$_id"}}}]
     async for grp in db.config.aggregate(pipeline):
         if grp["count"] > 1:
             docs = await db.config.find({"_id": {"$in": grp["ids"]}}).to_list(20)
@@ -256,10 +256,17 @@ async def seed_defaults():
             ids_to_delete = [d["_id"] for d in docs_sorted[1:]]
             await db.config.delete_many({"_id": {"$in": ids_to_delete}})
 
-    # Step 2: Now safe to create unique index
-    await db.config.create_index("key", unique=True)
+    # Step 2: Migrate old global configs (no userId) to userId=""
+    await db.config.update_many({"userId": {"$exists": False}}, {"$set": {"userId": ""}})
 
-    # Ensure all required keys exist (upsert defaults without overwriting existing values)
+    # Step 3: Now safe to create compound unique index
+    try:
+        await db.config.drop_index("key_1")
+    except Exception:
+        pass
+    await db.config.create_index([("key", 1), ("userId", 1)], unique=True)
+
+    # Ensure global default keys exist (userId="" = shared defaults, never overwrite user-specific)
     required_defaults = [
         ("wahaUrl", ""), ("wahaSession", "default"), ("wahaApiKey", ""),
         ("backendUrl", ""), ("aiProvider", ""), ("aiModel", ""),
@@ -271,51 +278,14 @@ async def seed_defaults():
     ]
     for key, default_val in required_defaults:
         await db.config.update_one(
-            {"key": key},
-            {"$setOnInsert": {"key": key, "value": default_val}},
+            {"key": key, "userId": ""},
+            {"$setOnInsert": {"key": key, "userId": "", "value": default_val}},
             upsert=True,
         )
 
     # Legacy migration: old deployments used hasWahaApiKey/hasAiApiKey, remove them
     await db.config.delete_many({"key": {"$in": ["hasWahaApiKey", "hasAiApiKey"]}})
 
-    # Config defaults (only if completely empty — legacy path)
-    config_count = await db.config.count_documents({"key": {"$nin": ["admin_password_hash"]}})
-    if config_count == 0:
-        defaults = [
-            {"key": "wahaUrl", "value": ""},
-            {"key": "wahaSession", "value": "default"},
-            {"key": "wahaApiKey", "value": ""},
-            {"key": "backendUrl", "value": ""},
-            {"key": "aiProvider", "value": ""},
-            {"key": "aiModel", "value": ""},
-            {"key": "aiApiKey", "value": ""},
-            {"key": "ollamaUrl", "value": ""},
-            {"key": "systemPrompt", "value": ""},
-            {"key": "businessInfo", "value": ""},
-            {"key": "aiTemperature", "value": 0.7},
-            {"key": "aiMaxTokens", "value": 500},
-            {"key": "memoryLimit", "value": 10},
-            {"key": "memoryTimeoutMinutes", "value": 30},
-            {"key": "ruleAiEnabled", "value": False},
-            {"key": "isBotActive", "value": False},
-            {"key": "workingHoursEnabled", "value": False},
-            {"key": "workingHoursStart", "value": "08:00"},
-            {"key": "workingHoursEnd", "value": "17:00"},
-            {"key": "offlineMessage", "value": ""},
-            {"key": "typingSimulation", "value": False},
-            {"key": "responseDelayMs", "value": 0},
-            {"key": "rateLimitPerMinute", "value": 15},
-            {"key": "maxIncomingMessageChars", "value": 2000},
-            {"key": "broadcastDailyLimit", "value": 100},
-            {"key": "broadcastBatchSize", "value": 10},
-            {"key": "defaultRuleResponseMode", "value": "direct"},
-            {"key": "logRetentionDays", "value": 30},
-            {"key": "messageRetentionDays", "value": 90},
-        ]
-        for d in defaults:
-            d["updated_at"] = datetime.utcnow()
-        await db.config.insert_many(defaults)
 
     # Seed default superadmin user in users collection
     if await db.users.count_documents({}) == 0:
@@ -788,18 +758,22 @@ async def toggle_user(user_id: str, admin: Dict = Depends(require_superadmin)):
 # ============================================================
 
 @api_router.get("/dashboard/stats")
-async def get_dashboard_stats(token: str = Depends(validate_token)):
-    total_messages = await db.messages.count_documents({})
-    total_contacts = await db.contacts.count_documents({})
-    active_rules = await db.rules.count_documents({"isActive": True})
+async def get_dashboard_stats(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    total_messages = await db.messages.count_documents({"userId": uid})
+    total_contacts = await db.contacts.count_documents({"userId": uid})
+    active_rules = await db.rules.count_documents({"userId": uid, "isActive": True})
 
-    pipeline = [{"$group": {"_id": None, "totalTokens": {"$sum": "$tokensUsed"}, "aiCalls": {"$sum": {"$cond": [{"$gt": ["$tokensUsed", 0]}, 1, 0]}}}}]
+    pipeline = [
+        {"$match": {"userId": uid}},
+        {"$group": {"_id": None, "totalTokens": {"$sum": "$tokensUsed"}, "aiCalls": {"$sum": {"$cond": [{"$gt": ["$tokensUsed", 0]}, 1, 0]}}}}
+    ]
     agg = await db.messages.aggregate(pipeline).to_list(1)
     tokens_used = agg[0]["totalTokens"] if agg else 0
     ai_calls = agg[0]["aiCalls"] if agg else 0
 
-    bot_active_doc = await db.config.find_one({"key": "isBotActive"})
-    bot_active = bot_active_doc["value"] if bot_active_doc else True
+    cfg = await _get_user_config(uid)
+    bot_active = cfg.get("isBotActive", False)
 
     total_users = await db.users.count_documents({})
     active_users = await db.users.count_documents({"isActive": True})
@@ -818,16 +792,17 @@ async def get_dashboard_stats(token: str = Depends(validate_token)):
     }
 
 @api_router.get("/dashboard/chart")
-async def get_dashboard_chart(token: str = Depends(validate_token)):
+async def get_dashboard_chart(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     chart_data = []
     for i in range(6, -1, -1):
         date = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
         messages_in = await db.messages.count_documents({
-            "direction": "incoming",
+            "userId": uid, "direction": "incoming",
             "timestamp": {"$regex": f"^{date}"}
         })
         messages_out = await db.messages.count_documents({
-            "direction": "outgoing",
+            "userId": uid, "direction": "outgoing",
             "timestamp": {"$regex": f"^{date}"}
         })
         chart_data.append({
@@ -843,52 +818,65 @@ async def get_dashboard_chart(token: str = Depends(validate_token)):
 # CONFIG
 # ============================================================
 
-@api_router.get("/config")
-async def get_config(token: str = Depends(validate_token)):
-    configs = await db.config.find({"key": {"$ne": "admin_password_hash"}}, {"_id": 0}).to_list(200)
+async def _get_user_config(user_id: str) -> dict:
+    """Load config for a user. User-specific values override global (userId='') defaults."""
+    all_docs = await db.config.find(
+        {"key": {"$ne": "admin_password_hash"}, "userId": {"$in": [user_id, ""]}},
+        {"_id": 0}
+    ).to_list(400)
     result = {}
-    for c in configs:
-        key = c["key"]
-        val = c.get("value", "")
-        # If duplicate keys exist, prefer the non-empty value
-        if key not in result or (not result[key] and val):
+    # First pass: global defaults
+    for c in all_docs:
+        if c.get("userId", "") == "":
+            key = c["key"]
+            val = c.get("value", "")
+            if key not in result or (not result[key] and val):
+                result[key] = val
+    # Second pass: user-specific overrides
+    for c in all_docs:
+        if c.get("userId", "") == user_id and user_id != "":
+            key = c["key"]
+            val = c.get("value", "")
             result[key] = val
     return result
 
+@api_router.get("/config")
+async def get_config(current_user: Dict = Depends(get_current_user)):
+    return await _get_user_config(current_user["userId"])
+
 @api_router.put("/config")
 async def update_config(req: ConfigUpdate, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     for key, value in req.updates.items():
         if key == "admin_password_hash":
             continue
         await db.config.update_one(
-            {"key": key},
-            {"$set": {"value": value, "updated_at": datetime.utcnow()}},
+            {"key": key, "userId": uid},
+            {"$set": {"key": key, "userId": uid, "value": value, "updated_at": datetime.utcnow()}},
             upsert=True
         )
-    await add_log("CONFIG_UPDATE", f"Config updated: {', '.join(req.updates.keys())}")
-    await log_user_activity(current_user["userId"], current_user["username"], "CONFIG_UPDATE", f"Update config: {', '.join(req.updates.keys())}")
+    await add_log("CONFIG_UPDATE", f"[{current_user['username']}] Config updated: {', '.join(req.updates.keys())}")
+    await log_user_activity(uid, current_user["username"], "CONFIG_UPDATE", f"Update config: {', '.join(req.updates.keys())}")
     return {"success": True}
 
 @api_router.get("/config/ai-agent")
-async def get_ai_agent_config(token: str = Depends(validate_token)):
+async def get_ai_agent_config(current_user: Dict = Depends(get_current_user)):
     keys = ["systemPrompt", "businessInfo", "aiTemperature", "aiMaxTokens", "memoryLimit", "memoryTimeoutMinutes", "ruleAiEnabled"]
-    result = {}
-    for key in keys:
-        doc = await db.config.find_one({"key": key})
-        result[key] = doc["value"] if doc else ""
-    return result
+    cfg = await _get_user_config(current_user["userId"])
+    return {k: cfg.get(k, "") for k in keys}
 
 @api_router.put("/config/ai-agent")
 async def update_ai_agent_config(req: AIAgentConfig, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     updates = req.dict(exclude_none=True)
     for key, value in updates.items():
         await db.config.update_one(
-            {"key": key},
-            {"$set": {"value": value, "updated_at": datetime.utcnow()}},
+            {"key": key, "userId": uid},
+            {"$set": {"key": key, "userId": uid, "value": value, "updated_at": datetime.utcnow()}},
             upsert=True
         )
-    await add_log("AI_AGENT_UPDATE", f"AI Agent config updated: {', '.join(updates.keys())}")
-    await log_user_activity(current_user["userId"], current_user["username"], "AI_AGENT_UPDATE", f"Update AI Agent config")
+    await add_log("AI_AGENT_UPDATE", f"[{current_user['username']}] AI Agent config updated: {', '.join(updates.keys())}")
+    await log_user_activity(uid, current_user["username"], "AI_AGENT_UPDATE", f"Update AI Agent config")
     return {"success": True, "updated_keys": list(updates.keys())}
 
 # ============================================================
@@ -930,47 +918,52 @@ async def clear_license(token: str = Depends(validate_token)):
 # ============================================================
 
 @api_router.get("/rules")
-async def get_rules(token: str = Depends(validate_token)):
-    rules = await db.rules.find({}, {"_id": 0}).sort("priority", 1).to_list(200)
+async def get_rules(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    rules = await db.rules.find({"userId": uid}, {"_id": 0}).sort("priority", 1).to_list(200)
     return rules
 
 @api_router.post("/rules")
 async def save_rule(rule: RuleModel, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     rule_dict = rule.dict()
     if not rule_dict.get("id"):
         rule_dict["id"] = str(uuid.uuid4())
+    rule_dict["userId"] = uid
     rule_dict["created_at"] = datetime.utcnow()
 
-    existing = await db.rules.find_one({"id": rule_dict["id"]})
+    existing = await db.rules.find_one({"id": rule_dict["id"], "userId": uid})
     if existing:
-        await db.rules.update_one({"id": rule_dict["id"]}, {"$set": rule_dict})
+        await db.rules.update_one({"id": rule_dict["id"], "userId": uid}, {"$set": rule_dict})
         action = "RULE_UPDATED"
     else:
         await db.rules.insert_one(rule_dict)
         action = "RULE_CREATED"
 
-    await add_log("RULE_SAVED", f"Rule '{rule_dict['name']}' disimpan")
-    await log_user_activity(current_user["userId"], current_user["username"], action, f"Rule '{rule_dict['name']}'")
+    await add_log("RULE_SAVED", f"[{current_user['username']}] Rule '{rule_dict['name']}' disimpan")
+    await log_user_activity(uid, current_user["username"], action, f"Rule '{rule_dict['name']}'")
     rule_dict.pop("_id", None)
     return {"success": True, "rule": rule_dict}
 
 @api_router.delete("/rules/{rule_id}")
 async def delete_rule(rule_id: str, current_user: Dict = Depends(get_current_user)):
-    rule = await db.rules.find_one({"id": rule_id})
-    result = await db.rules.delete_one({"id": rule_id})
+    uid = current_user["userId"]
+    rule = await db.rules.find_one({"id": rule_id, "userId": uid})
+    result = await db.rules.delete_one({"id": rule_id, "userId": uid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Rule tidak ditemukan")
-    await add_log("RULE_DELETED", f"Rule {rule_id} dihapus")
-    await log_user_activity(current_user["userId"], current_user["username"], "RULE_DELETED", f"Rule '{rule.get('name', rule_id)}' dihapus")
+    await add_log("RULE_DELETED", f"[{current_user['username']}] Rule '{rule.get('name', rule_id)}' dihapus")
+    await log_user_activity(uid, current_user["username"], "RULE_DELETED", f"Rule '{rule.get('name', rule_id)}' dihapus")
     return {"success": True}
 
 @api_router.put("/rules/{rule_id}/toggle")
-async def toggle_rule(rule_id: str, token: str = Depends(validate_token)):
-    rule = await db.rules.find_one({"id": rule_id})
+async def toggle_rule(rule_id: str, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    rule = await db.rules.find_one({"id": rule_id, "userId": uid})
     if not rule:
         raise HTTPException(status_code=404, detail="Rule tidak ditemukan")
     new_status = not rule.get("isActive", True)
-    await db.rules.update_one({"id": rule_id}, {"$set": {"isActive": new_status}})
+    await db.rules.update_one({"id": rule_id, "userId": uid}, {"$set": {"isActive": new_status}})
     return {"success": True, "isActive": new_status}
 
 # ============================================================
@@ -978,38 +971,42 @@ async def toggle_rule(rule_id: str, token: str = Depends(validate_token)):
 # ============================================================
 
 @api_router.get("/knowledge")
-async def get_knowledge(token: str = Depends(validate_token)):
-    items = await db.knowledge.find({}, {"_id": 0}).to_list(200)
+async def get_knowledge(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    items = await db.knowledge.find({"userId": uid}, {"_id": 0}).to_list(200)
     return items
 
 @api_router.post("/knowledge")
 async def save_knowledge(item: KnowledgeModel, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     item_dict = item.dict()
     if not item_dict.get("id"):
         item_dict["id"] = str(uuid.uuid4())
+    item_dict["userId"] = uid
     item_dict["created_at"] = datetime.utcnow()
 
-    existing = await db.knowledge.find_one({"id": item_dict["id"]})
+    existing = await db.knowledge.find_one({"id": item_dict["id"], "userId": uid})
     if existing:
-        await db.knowledge.update_one({"id": item_dict["id"]}, {"$set": item_dict})
+        await db.knowledge.update_one({"id": item_dict["id"], "userId": uid}, {"$set": item_dict})
         action = "KNOWLEDGE_UPDATED"
     else:
         await db.knowledge.insert_one(item_dict)
         action = "KNOWLEDGE_CREATED"
 
-    await add_log("KNOWLEDGE_SAVED", f"Knowledge '{item_dict['category']}' disimpan")
-    await log_user_activity(current_user["userId"], current_user["username"], action, f"Knowledge '{item_dict['keyword']}' ({item_dict['category']})")
+    await add_log("KNOWLEDGE_SAVED", f"[{current_user['username']}] Knowledge '{item_dict['category']}' disimpan")
+    await log_user_activity(uid, current_user["username"], action, f"Knowledge '{item_dict['keyword']}' ({item_dict['category']})")
     item_dict.pop("_id", None)
     return {"success": True, "item": item_dict}
 
 @api_router.delete("/knowledge/{item_id}")
 async def delete_knowledge(item_id: str, current_user: Dict = Depends(get_current_user)):
-    item = await db.knowledge.find_one({"id": item_id})
-    result = await db.knowledge.delete_one({"id": item_id})
+    uid = current_user["userId"]
+    item = await db.knowledge.find_one({"id": item_id, "userId": uid})
+    result = await db.knowledge.delete_one({"id": item_id, "userId": uid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Knowledge tidak ditemukan")
-    await add_log("KNOWLEDGE_DELETED", f"Knowledge {item_id} dihapus")
-    await log_user_activity(current_user["userId"], current_user["username"], "KNOWLEDGE_DELETED", f"Knowledge '{item.get('keyword', item_id)}' dihapus")
+    await add_log("KNOWLEDGE_DELETED", f"[{current_user['username']}] Knowledge '{item.get('keyword', item_id)}' dihapus")
+    await log_user_activity(uid, current_user["username"], "KNOWLEDGE_DELETED", f"Knowledge '{item.get('keyword', item_id)}' dihapus")
     return {"success": True}
 
 # ============================================================
@@ -1017,33 +1014,37 @@ async def delete_knowledge(item_id: str, current_user: Dict = Depends(get_curren
 # ============================================================
 
 @api_router.get("/templates")
-async def get_templates(token: str = Depends(validate_token)):
-    items = await db.templates.find({}, {"_id": 0}).to_list(200)
+async def get_templates(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    items = await db.templates.find({"userId": uid}, {"_id": 0}).to_list(200)
     return items
 
 @api_router.post("/templates")
-async def save_template(item: TemplateModel, token: str = Depends(validate_token)):
+async def save_template(item: TemplateModel, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     item_dict = item.dict()
     if not item_dict.get("id"):
         item_dict["id"] = str(uuid.uuid4())
+    item_dict["userId"] = uid
     item_dict["created_at"] = datetime.utcnow()
 
-    existing = await db.templates.find_one({"id": item_dict["id"]})
+    existing = await db.templates.find_one({"id": item_dict["id"], "userId": uid})
     if existing:
-        await db.templates.update_one({"id": item_dict["id"]}, {"$set": item_dict})
+        await db.templates.update_one({"id": item_dict["id"], "userId": uid}, {"$set": item_dict})
     else:
         await db.templates.insert_one(item_dict)
 
-    await add_log("TEMPLATE_SAVED", f"Template '{item_dict['name']}' disimpan")
+    await add_log("TEMPLATE_SAVED", f"[{current_user['username']}] Template '{item_dict['name']}' disimpan")
     item_dict.pop("_id", None)
     return {"success": True, "item": item_dict}
 
 @api_router.delete("/templates/{item_id}")
-async def delete_template(item_id: str, token: str = Depends(validate_token)):
-    result = await db.templates.delete_one({"id": item_id})
+async def delete_template(item_id: str, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    result = await db.templates.delete_one({"id": item_id, "userId": uid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Template tidak ditemukan")
-    await add_log("TEMPLATE_DELETED", f"Template {item_id} dihapus")
+    await add_log("TEMPLATE_DELETED", f"[{current_user['username']}] Template {item_id} dihapus")
     return {"success": True}
 
 # ============================================================
@@ -1051,33 +1052,36 @@ async def delete_template(item_id: str, token: str = Depends(validate_token)):
 # ============================================================
 
 @api_router.get("/contacts")
-async def get_contacts(search: str = "", token: str = Depends(validate_token)):
-    query = {}
+async def get_contacts(search: str = "", current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    query: dict = {"userId": uid}
     if search:
-        query = {"$or": [
+        query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
-            {"phone": {"$regex": search}},
+            {"chatId": {"$regex": search}},
             {"tag": {"$regex": search, "$options": "i"}},
-        ]}
-    contacts = await db.contacts.find(query, {"_id": 0}).sort("lastInteraction", -1).to_list(500)
+        ]
+    contacts = await db.contacts.find(query, {"_id": 0}).sort("lastSeen", -1).to_list(500)
     return contacts
 
 @api_router.put("/contacts/{chat_id}")
-async def update_contact(chat_id: str, update: ContactUpdate, token: str = Depends(validate_token)):
+async def update_contact(chat_id: str, update: ContactUpdate, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     update_dict = {k: v for k, v in update.dict().items() if v is not None}
     if not update_dict:
         return {"success": True}
-    result = await db.contacts.update_one({"chatId": chat_id}, {"$set": update_dict})
+    result = await db.contacts.update_one({"chatId": chat_id, "userId": uid}, {"$set": update_dict})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Kontak tidak ditemukan")
     return {"success": True}
 
 @api_router.delete("/contacts/{chat_id}")
-async def delete_contact(chat_id: str, token: str = Depends(validate_token)):
-    result = await db.contacts.delete_one({"chatId": chat_id})
+async def delete_contact(chat_id: str, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    result = await db.contacts.delete_one({"chatId": chat_id, "userId": uid})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Kontak tidak ditemukan")
-    await add_log("CONTACT_DELETED", f"Kontak {chat_id[:10]}... dihapus")
+    await add_log("CONTACT_DELETED", f"[{current_user['username']}] Kontak {chat_id[:10]}... dihapus")
     return {"success": True}
 
 # ============================================================
@@ -1085,8 +1089,9 @@ async def delete_contact(chat_id: str, token: str = Depends(validate_token)):
 # ============================================================
 
 @api_router.get("/messages")
-async def get_messages(limit: int = 50, token: str = Depends(validate_token)):
-    messages = await db.messages.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+async def get_messages(limit: int = 50, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    messages = await db.messages.find({"userId": uid}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return messages
 
 # ============================================================
@@ -1094,12 +1099,13 @@ async def get_messages(limit: int = 50, token: str = Depends(validate_token)):
 # ============================================================
 
 @api_router.post("/broadcast/check")
-async def check_broadcast(req: BroadcastCheck, token: str = Depends(validate_token)):
+async def check_broadcast(req: BroadcastCheck, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     if req.target == "all":
-        count = await db.contacts.count_documents({"isBlocked": {"$ne": True}})
+        count = await db.contacts.count_documents({"userId": uid, "isBlocked": {"$ne": True}})
     elif req.target == "tag" and req.tag:
         tags = [t.strip() for t in req.tag.split(",")]
-        query = {"isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]}
+        query = {"userId": uid, "isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]}
         count = await db.contacts.count_documents(query)
     elif req.target == "custom" and req.customNumbers:
         count = len([n for n in req.customNumbers.split("\n") if n.strip()])
@@ -1109,15 +1115,16 @@ async def check_broadcast(req: BroadcastCheck, token: str = Depends(validate_tok
 
 @api_router.post("/broadcast/send")
 async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong")
 
     if req.target == "all":
-        contacts = await db.contacts.find({"isBlocked": {"$ne": True}}, {"chatId": 1}).to_list(500)
+        contacts = await db.contacts.find({"userId": uid, "isBlocked": {"$ne": True}}, {"chatId": 1}).to_list(500)
     elif req.target == "tag" and req.tag:
         tags = [t.strip() for t in req.tag.split(",")]
         contacts = await db.contacts.find(
-            {"isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]},
+            {"userId": uid, "isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]},
             {"chatId": 1}
         ).to_list(500)
     elif req.target == "custom" and req.customNumbers:
@@ -1127,19 +1134,20 @@ async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_cu
         contacts = []
 
     count = len(contacts)
-    await add_log("BROADCAST_SENT", f"Broadcast dikirim ke {count} kontak")
+    await add_log("BROADCAST_SENT", f"[{current_user['username']}] Broadcast dikirim ke {count} kontak")
 
     for c in contacts:
         await db.messages.insert_one({
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "chatId": c.get("chatId", "unknown"),
+            "userId": uid,
             "direction": "outgoing",
             "message": req.message[:200],
             "responseType": "broadcast",
             "tokensUsed": 0
         })
 
-    await log_user_activity(current_user["userId"], current_user["username"], "BROADCAST_SENT", f"Broadcast ke {count} kontak")
+    await log_user_activity(uid, current_user["username"], "BROADCAST_SENT", f"Broadcast ke {count} kontak")
     return {"success": True, "sent": count}
 
 # ============================================================
@@ -1147,15 +1155,19 @@ async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_cu
 # ============================================================
 
 @api_router.get("/logs")
-async def get_logs(limit: int = 50, token: str = Depends(validate_token)):
-    logs = await db.logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+async def get_logs(limit: int = 50, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    # superadmin melihat semua log; user biasa hanya log miliknya
+    query: dict = {} if current_user.get("role") == "superadmin" else {"userId": uid}
+    logs = await db.logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return logs
 
-async def add_log(log_type: str, message: str):
+async def add_log(log_type: str, message: str, user_id: str = ""):
     await db.logs.insert_one({
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "type": log_type,
-        "message": message
+        "message": message,
+        "userId": user_id,
     })
 
 async def log_user_activity(user_id: str, username: str, action: str, detail: str = ""):
@@ -1172,9 +1184,10 @@ async def log_user_activity(user_id: str, username: str, action: str, detail: st
 # ============================================================
 
 @api_router.post("/test/rule")
-async def test_rule(req: TestRequest, token: str = Depends(validate_token)):
+async def test_rule(req: TestRequest, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     msg = req.message.lower()
-    rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
 
     for rule in rules:
         trigger = rule.get("triggerValue", "")
@@ -1191,9 +1204,10 @@ async def test_rule(req: TestRequest, token: str = Depends(validate_token)):
     return {"type": "Rule Match", "status": "no_match", "detail": "Tidak ada rule yang cocok dengan pesan tersebut."}
 
 @api_router.post("/test/knowledge")
-async def test_knowledge(req: TestRequest, token: str = Depends(validate_token)):
+async def test_knowledge(req: TestRequest, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     msg = req.message.lower()
-    items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
+    items = await db.knowledge.find({"userId": uid, "isActive": True}, {"_id": 0}).to_list(100)
 
     for item in items:
         keywords = [k.strip().lower() for k in item.get("keyword", "").split("|")]
@@ -1203,16 +1217,17 @@ async def test_knowledge(req: TestRequest, token: str = Depends(validate_token))
     return {"type": "Knowledge Match", "status": "no_match", "detail": "Tidak ada knowledge yang cocok."}
 
 @api_router.post("/test/full-flow")
-async def test_full_flow(req: TestRequest, token: str = Depends(validate_token)):
+async def test_full_flow(req: TestRequest, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     msg = req.message.lower()
 
-    rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
     for rule in rules:
         keywords = [k.strip().lower() for k in rule.get("triggerValue", "").split("|")]
         if any(kw in msg for kw in keywords):
             return {"type": "Full Flow", "status": "success", "detail": f'Flow: Rule "{rule["name"]}" matched → Mode: {rule.get("responseMode", "direct")} → Response: "{rule["response"][:150]}"'}
 
-    items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
+    items = await db.knowledge.find({"userId": uid, "isActive": True}, {"_id": 0}).to_list(100)
     for item in items:
         keywords = [k.strip().lower() for k in item.get("keyword", "").split("|")]
         if any(kw in msg for kw in keywords):
@@ -1225,31 +1240,34 @@ async def test_full_flow(req: TestRequest, token: str = Depends(validate_token))
 # ============================================================
 
 @api_router.post("/reset/config")
-async def reset_config(token: str = Depends(validate_token)):
-    await db.rules.delete_many({})
-    await db.knowledge.delete_many({})
-    await db.templates.delete_many({})
+async def reset_config(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    await db.rules.delete_many({"userId": uid})
+    await db.knowledge.delete_many({"userId": uid})
+    await db.templates.delete_many({"userId": uid})
     ai_keys = ["systemPrompt", "businessInfo", "aiTemperature", "aiMaxTokens", "memoryLimit", "memoryTimeoutMinutes", "ruleAiEnabled"]
     for key in ai_keys:
-        await db.config.update_one({"key": key}, {"$set": {"value": ""}}, upsert=True)
-    await add_log("RESET_CONFIG", "Konfigurasi BOT direset")
+        await db.config.update_one({"key": key, "userId": uid}, {"$set": {"value": ""}})
+    await add_log("RESET_CONFIG", f"[{current_user['username']}] Konfigurasi BOT direset", uid)
     return {"success": True, "message": "Konfigurasi BOT berhasil direset. Rules, Knowledge, Template dikosongkan."}
 
 @api_router.post("/reset/dashboard")
-async def reset_dashboard(token: str = Depends(validate_token)):
-    await add_log("RESET_DASHBOARD", "Data dashboard direset")
+async def reset_dashboard(current_user: Dict = Depends(get_current_user)):
+    await add_log("RESET_DASHBOARD", f"[{current_user['username']}] Data dashboard direset", current_user["userId"])
     return {"success": True, "message": "Data dashboard berhasil direset."}
 
 @api_router.post("/reset/messages")
-async def reset_messages(token: str = Depends(validate_token)):
-    result = await db.messages.delete_many({})
-    await add_log("RESET_MESSAGES", f"Data pesan direset ({result.deleted_count} pesan dihapus)")
+async def reset_messages(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    result = await db.messages.delete_many({"userId": uid})
+    await add_log("RESET_MESSAGES", f"[{current_user['username']}] Data pesan direset ({result.deleted_count} pesan dihapus)", uid)
     return {"success": True, "message": f"Data pesan berhasil direset. {result.deleted_count} pesan dihapus."}
 
 @api_router.post("/reset/contacts")
-async def reset_contacts(token: str = Depends(validate_token)):
-    result = await db.contacts.delete_many({})
-    await add_log("RESET_CONTACTS", f"Data kontak direset ({result.deleted_count} kontak dihapus)")
+async def reset_contacts(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    result = await db.contacts.delete_many({"userId": uid})
+    await add_log("RESET_CONTACTS", f"[{current_user['username']}] Data kontak direset ({result.deleted_count} kontak dihapus)", uid)
     return {"success": True, "message": f"Data kontak berhasil direset. {result.deleted_count} kontak dihapus."}
 
 # ============================================================
@@ -1506,14 +1524,40 @@ async def receive_webhook(token: str, request: Request):
         await add_log("WEBHOOK_SKIP", f"[{user['username']}] Tipe pesan tidak didukung: {msg_type} dari {chat_id}")
         return {"success": True, "processed": False, "reason": f"unsupported_type:{msg_type}"}
 
-    await add_log("MESSAGE_IN", f"[{user['username']}] Pesan dari {chat_id}: '{body[:80]}'")
+    uid = str(user.get("id", ""))
+
+    # Load user-specific config (with fallback to global defaults)
+    cfg = await _get_user_config(uid)
+
+    waha_url = cfg.get("wahaUrl", "").rstrip("/")
+    waha_session = cfg.get("wahaSession", "default") or "default"
+    waha_api_key = cfg.get("wahaApiKey", "")
+
+    # Filter by WAHA session — only handle messages from the user's configured session
+    waha_event_session = payload.get("session", "")
+    if waha_event_session and waha_session and waha_event_session != waha_session:
+        return {"success": True, "processed": False, "reason": f"session_mismatch:{waha_event_session}!={waha_session}"}
+
+    # Check if bot is active (per-user)
+    bot_is_active = cfg.get("isBotActive", False)
+    if not bot_is_active:
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Bot tidak aktif — aktifkan di menu Setting → Bot Aktif", uid)
+        return {"success": True, "processed": False, "reason": "bot_inactive"}
+
+    # Check if contact is blocked
+    contact = await db.contacts.find_one({"chatId": chat_id, "userId": uid})
+    if contact and contact.get("isBlocked"):
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Kontak {chat_id} diblokir", uid)
+        return {"success": True, "processed": False, "reason": "blocked"}
+
+    await add_log("MESSAGE_IN", f"[{user['username']}] Pesan dari {chat_id}: '{body[:80]}'", uid)
 
     # Store incoming message
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     await db.messages.insert_one({
         "timestamp": now_str,
         "chatId": chat_id,
-        "userId": str(user.get("id", "")),
+        "userId": uid,
         "direction": "incoming",
         "message": body[:500],
         "responseType": "incoming",
@@ -1522,47 +1566,22 @@ async def receive_webhook(token: str, request: Request):
 
     # Update/create contact
     await db.contacts.update_one(
-        {"chatId": chat_id, "userId": str(user.get("id", ""))},
+        {"chatId": chat_id, "userId": uid},
         {"$set": {
             "chatId": chat_id,
-            "userId": str(user.get("id", "")),
+            "userId": uid,
             "lastSeen": now_str,
             "name": msg_payload.get("notifyName") or msg_payload.get("pushName") or chat_id.replace("@c.us", ""),
         }, "$setOnInsert": {"isBlocked": False, "tag": "", "createdAt": now_str}},
         upsert=True
     )
 
-    # Check if contact is blocked
-    contact = await db.contacts.find_one({"chatId": chat_id, "userId": str(user.get("id", ""))})
-    if contact and contact.get("isBlocked"):
-        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Kontak {chat_id} diblokir")
-        return {"success": True, "processed": False, "reason": "blocked"}
-
-    # Check if bot is active
-    bot_active_doc = await db.config.find_one({"key": "isBotActive"})
-    bot_is_active = bot_active_doc.get("value") if bot_active_doc else False
-    if not bot_is_active:
-        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Bot tidak aktif — aktifkan di menu Setting → Bot Aktif")
-        return {"success": True, "processed": False, "reason": "bot_inactive"}
-
-    # Get all config at once
-    config_keys = ["wahaUrl", "wahaSession", "wahaApiKey", "aiProvider", "aiModel",
-                   "aiApiKey", "ollamaUrl", "systemPrompt", "businessInfo",
-                   "aiTemperature", "aiMaxTokens", "memoryLimit"]
-    cfg = {}
-    async for doc in db.config.find({"key": {"$in": config_keys}}):
-        cfg[doc["key"]] = doc.get("value", "")
-
-    waha_url = cfg.get("wahaUrl", "").rstrip("/")
-    waha_session = cfg.get("wahaSession", "default") or "default"
-    waha_api_key = cfg.get("wahaApiKey", "")
-
     # ── Step 1: Rules engine ──────────────────────────────────
     reply_text = None
     response_type = "ai"
     msg_lower = body.lower()
 
-    rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
     for rule in rules:
         trigger = rule.get("triggerValue", "").strip()
         trigger_type = rule.get("triggerType", "contains")
@@ -1582,7 +1601,7 @@ async def receive_webhook(token: str, request: Request):
             if mode == "direct":
                 reply_text = rule.get("response", "")
                 response_type = "rule"
-                await add_log("RULE_HIT", f"Rule '{rule['name']}' matched untuk {chat_id}")
+                await add_log("RULE_HIT", f"[{user['username']}] Rule '{rule['name']}' matched untuk {chat_id}", uid)
                 break
             # mode == "ai" → fall through to AI with rule context
             break
@@ -1590,7 +1609,7 @@ async def receive_webhook(token: str, request: Request):
     # ── Step 2: Knowledge base context ───────────────────────
     knowledge_context = ""
     if not reply_text:
-        items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
+        items = await db.knowledge.find({"userId": uid, "isActive": True}, {"_id": 0}).to_list(100)
         matched_items = []
         for item in items:
             keywords = [k.strip().lower() for k in item.get("keyword", "").split("|") if k.strip()]
@@ -1613,18 +1632,18 @@ async def receive_webhook(token: str, request: Request):
         memory_limit = int(cfg.get("memoryLimit") or 10)
 
         if not provider:
-            await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Set di menu Koneksi → AI Provider.")
+            await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Set di menu Koneksi → AI Provider.", uid)
         elif not ai_api_key and provider != "OLLAMA":
-            await add_log("AI_ERROR", f"[{user['username']}] AI API Key belum diisi untuk provider {provider}. Set di menu Koneksi → AI Provider.")
+            await add_log("AI_ERROR", f"[{user['username']}] AI API Key belum diisi untuk provider {provider}. Set di menu Koneksi → AI Provider.", uid)
 
         if business_info:
             system_prompt += f"\n\nInformasi bisnis:\n{business_info}"
         if knowledge_context:
             system_prompt += f"\n\nGunakan informasi berikut untuk menjawab:\n{knowledge_context}"
 
-        # Get conversation history for memory
+        # Get conversation history for memory (per-user + per-contact)
         history_docs = await db.messages.find(
-            {"chatId": chat_id, "direction": {"$in": ["incoming", "outgoing"]}}
+            {"chatId": chat_id, "userId": uid, "direction": {"$in": ["incoming", "outgoing"]}}
         ).sort("timestamp", -1).to_list(memory_limit * 2)
         history_docs.reverse()
 
@@ -1634,32 +1653,32 @@ async def receive_webhook(token: str, request: Request):
             messages.append({"role": role, "content": h["message"]})
         messages.append({"role": "user", "content": body})
 
-        await add_log("AI_CALL", f"[{user['username']}] Memanggil AI {provider}/{model} untuk {chat_id}")
+        await add_log("AI_CALL", f"[{user['username']}] Memanggil AI {provider}/{model} untuk {chat_id}", uid)
         reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
         response_type = "ai"
 
     if not reply_text:
-        await add_log("AI_ERROR", f"[{user['username']}] AI tidak menghasilkan balasan untuk {chat_id}")
+        await add_log("AI_ERROR", f"[{user['username']}] AI tidak menghasilkan balasan untuk {chat_id}", uid)
         reply_text = "Maaf, saya tidak dapat memproses pesan Anda saat ini."
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
     if waha_url:
         await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, reply_text)
     else:
-        await add_log("WAHA_ERROR", f"[{user['username']}] WAHA URL kosong, balasan tidak terkirim!")
+        await add_log("WAHA_ERROR", f"[{user['username']}] WAHA URL kosong, balasan tidak terkirim!", uid)
 
     # Store outgoing message
     await db.messages.insert_one({
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "chatId": chat_id,
-        "userId": str(user.get("id", "")),
+        "userId": uid,
         "direction": "outgoing",
         "message": reply_text[:500],
         "responseType": response_type,
         "tokensUsed": 0,
     })
 
-    await add_log("MESSAGE_OUT", f"[{user['username']}] Balas ke {chat_id}: [{response_type}] '{reply_text[:80]}'")
+    await add_log("MESSAGE_OUT", f"[{user['username']}] Balas ke {chat_id}: [{response_type}] '{reply_text[:80]}'", uid)
     return {"success": True, "processed": True, "responseType": response_type}
 
 
@@ -1773,15 +1792,16 @@ async def _call_anthropic(model: str, api_key: str, system_prompt: str,
 # WAHA PROXY
 # ============================================================
 
-async def get_waha_config():
-    keys = ["wahaUrl", "wahaSession", "wahaApiKey"]
-    result = {}
-    for key in keys:
-        doc = await db.config.find_one({"key": key})
-        result[key] = doc["value"] if doc else ""
-    url = result.get("wahaUrl", "").rstrip("/")
-    session = result.get("wahaSession", "default") or "default"
-    api_key = result.get("wahaApiKey", "")
+async def get_waha_config(uid: str = ""):
+    cfg = await _get_user_config(uid) if uid else {}
+    if not cfg:
+        # fallback to global config for backward compat
+        for key in ["wahaUrl", "wahaSession", "wahaApiKey"]:
+            doc = await db.config.find_one({"key": key, "userId": ""})
+            cfg[key] = doc["value"] if doc else ""
+    url = cfg.get("wahaUrl", "").rstrip("/")
+    session = cfg.get("wahaSession", "default") or "default"
+    api_key = cfg.get("wahaApiKey", "")
     if not url:
         raise HTTPException(status_code=400, detail="WAHA URL belum dikonfigurasi.")
     return url, session, api_key
@@ -1793,8 +1813,8 @@ def waha_headers(api_key: str) -> dict:
     return h
 
 @api_router.get("/waha/status")
-async def waha_status(token: str = Depends(validate_token)):
-    waha_url, session, api_key = await get_waha_config()
+async def waha_status(current_user: Dict = Depends(get_current_user)):
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
@@ -1813,8 +1833,8 @@ async def waha_status(token: str = Depends(validate_token)):
         raise HTTPException(status_code=502, detail=str(e))
 
 @api_router.get("/waha/qr")
-async def waha_qr(token: str = Depends(validate_token)):
-    waha_url, session, api_key = await get_waha_config()
+async def waha_qr(current_user: Dict = Depends(get_current_user)):
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
@@ -1833,17 +1853,15 @@ async def waha_qr(token: str = Depends(validate_token)):
         raise HTTPException(status_code=502, detail=str(e))
 
 @api_router.post("/waha/start")
-async def waha_start(token: str = Depends(validate_token)):
-    waha_url, session, api_key = await get_waha_config()
+async def waha_start(current_user: Dict = Depends(get_current_user)):
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            # Try to start existing session first
             r = await client.post(
                 f"{waha_url}/api/sessions/{session}/start",
                 headers=waha_headers(api_key),
             )
             if r.status_code == 404:
-                # Session doesn't exist, create it
                 r2 = await client.post(
                     f"{waha_url}/api/sessions",
                     json={"name": session, "start": True},
@@ -1859,8 +1877,8 @@ async def waha_start(token: str = Depends(validate_token)):
         raise HTTPException(status_code=502, detail=str(e))
 
 @api_router.post("/waha/stop")
-async def waha_stop(token: str = Depends(validate_token)):
-    waha_url, session, api_key = await get_waha_config()
+async def waha_stop(current_user: Dict = Depends(get_current_user)):
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(
@@ -1877,17 +1895,15 @@ async def waha_stop(token: str = Depends(validate_token)):
 
 @api_router.get("/waha/webhook")
 async def waha_get_webhook(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config()
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Try WAHA Plus style first: GET /api/sessions/{session}
             r = await client.get(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
             if r.status_code == 200:
                 data = r.json()
                 webhooks = data.get("config", {}).get("webhooks", [])
                 if webhooks:
                     return {"success": True, "webhooks": webhooks}
-            # Fallback: GET /api/{session}/webhook
             r2 = await client.get(f"{waha_url}/api/{session}/webhook", headers=waha_headers(api_key))
             if r2.status_code == 200:
                 return {"success": True, "webhooks": [r2.json()]}
@@ -1898,9 +1914,9 @@ async def waha_get_webhook(current_user: Dict = Depends(get_current_user)):
         raise HTTPException(status_code=502, detail=str(e))
 
 @api_router.get("/waha/debug")
-async def waha_debug(token: str = Depends(validate_token)):
+async def waha_debug(current_user: Dict = Depends(get_current_user)):
     """Return raw WAHA session info and available routes for debugging."""
-    waha_url, session, api_key = await get_waha_config()
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
     results = {}
     endpoints_to_probe = [
         ("GET", f"/api/sessions/{session}"),
@@ -1925,16 +1941,17 @@ async def waha_debug(token: str = Depends(validate_token)):
 
 @api_router.post("/waha/webhook")
 async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config()
+    uid = current_user["userId"]
+    waha_url, session, api_key = await get_waha_config(uid)
 
     # Get user's webhook token
-    user = await db.users.find_one({"id": current_user["userId"]})
+    user = await db.users.find_one({"id": uid})
     if not user or not user.get("webhookToken"):
         raise HTTPException(status_code=400, detail="Token webhook user tidak ditemukan.")
 
-    # Get backend public URL
-    backend_url_doc = await db.config.find_one({"key": "backendUrl"})
-    backend_url = (backend_url_doc["value"] if backend_url_doc else "").rstrip("/")
+    # Get backend public URL from user-specific config
+    cfg = await _get_user_config(uid)
+    backend_url = cfg.get("backendUrl", "").rstrip("/")
     if not backend_url:
         raise HTTPException(status_code=400, detail="Backend URL belum dikonfigurasi.")
 
