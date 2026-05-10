@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { getLogs } from '../api/apiClient';
+import { formatWaktu } from '../utils/time';
 import { RefreshCw, ExternalLink } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 
 const logTypeColors = {
-  WEBHOOK_IN: 'bg-blue-50 text-blue-600',
+  WEBHOOK_IN: 'bg-slate-100 text-slate-600',
   RULE_MATCH: 'bg-violet-50 text-violet-600',
   KNOWLEDGE_MATCH: 'bg-indigo-50 text-indigo-600',
   AI_CALL: 'bg-amber-50 text-amber-600',
@@ -23,11 +24,28 @@ const logTypeColors = {
   RESET_CONTACTS: 'bg-amber-50 text-amber-600',
   BROADCAST_SENT: 'bg-emerald-50 text-emerald-600',
   PASSWORD_CHANGED: 'bg-blue-50 text-blue-600',
+  MESSAGE_IN: 'bg-blue-50 text-blue-600',
+  MESSAGE_OUT: 'bg-emerald-50 text-emerald-600',
+  RULE_HIT: 'bg-violet-50 text-violet-600',
+  WEBHOOK_SKIP: 'bg-amber-50 text-amber-600',
+  AI_ERROR: 'bg-red-50 text-red-600',
+  WAHA_ERROR: 'bg-red-50 text-red-600',
+  WAHA_SEND_ERROR: 'bg-red-50 text-red-600',
 };
+
+function parseSumber(log) {
+  if (log.type !== 'MESSAGE_OUT') return null;
+  const msg = log.message || '';
+  if (msg.includes('[rule]')) return { label: 'SISTEM', cls: 'bg-violet-100 text-violet-700' };
+  if (msg.includes('[ai]')) return { label: 'AI', cls: 'bg-amber-100 text-amber-700' };
+  if (msg.includes('[combo]')) return { label: 'GABUNGAN', cls: 'bg-blue-100 text-blue-700' };
+  return null;
+}
 
 const Logs = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const timezone = localStorage.getItem('userTimezone') || 'WIB';
 
   const fetchData = async () => {
     try { setLoading(true); const data = await getLogs(100); setLogs(data); } catch (e) { toast.error('Gagal memuat logs'); } finally { setLoading(false); }
@@ -46,16 +64,19 @@ const Logs = () => {
         {loading ? <div className="flex justify-center py-10"><div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" /></div> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200"><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase" style={{width:'160px'}}>Waktu</th><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase" style={{width:'160px'}}>Tipe</th><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Pesan</th></tr></thead>
+              <thead><tr className="border-b border-slate-200"><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase" style={{width:'160px'}}>Waktu</th><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase" style={{width:'160px'}}>Tipe</th><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase" style={{width:'100px'}}>Sumber</th><th className="text-left py-3 px-3 text-xs font-semibold text-slate-500 uppercase">Pesan</th></tr></thead>
               <tbody>
                 {logs.map((log, idx) => (
                   <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
-                    <td className="py-3 px-3 text-xs text-slate-500 font-mono whitespace-nowrap">{log.timestamp}</td>
+                    <td className="py-3 px-3 text-xs text-slate-500 font-mono whitespace-nowrap">{formatWaktu(log.timestamp, timezone)}</td>
                     <td className="py-3 px-3"><Badge className={`text-[10px] font-mono ${logTypeColors[log.type] || 'bg-slate-100 text-slate-500'} hover:opacity-90`}>{log.type}</Badge></td>
+                    <td className="py-3 px-3">
+                      {(() => { const s = parseSumber(log); return s ? <Badge className={`text-[10px] ${s.cls} hover:opacity-90`}>{s.label}</Badge> : null; })()}
+                    </td>
                     <td className="py-3 px-3 text-slate-600">{log.message}</td>
                   </tr>
                 ))}
-                {logs.length === 0 && <tr><td colSpan="3" className="py-8 text-center text-slate-400">Belum ada log.</td></tr>}
+                {logs.length === 0 && <tr><td colSpan="4" className="py-8 text-center text-slate-400">Belum ada log.</td></tr>}
               </tbody>
             </table>
           </div>

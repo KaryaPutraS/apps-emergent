@@ -23,12 +23,17 @@ const SettingsPage = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
-    getConfig().then(data => { setConfig(data); setLoading(false); }).catch(() => setLoading(false));
+    getConfig().then(data => {
+      setConfig(data);
+      if (data.timezone) localStorage.setItem('userTimezone', data.timezone);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
 
   const handleSaveAll = async () => {
     try {
       await updateConfig(config);
+      if (config.timezone) localStorage.setItem('userTimezone', config.timezone);
       toast.success('Semua pengaturan tersimpan!');
     } catch (e) { toast.error('Gagal menyimpan pengaturan'); }
   };
@@ -56,6 +61,20 @@ const SettingsPage = () => {
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><Bot className="w-4 h-4 text-emerald-500" /> Status Bot</h3>
         <div className="flex items-center gap-3"><Switch checked={val('isBotActive', true)} onCheckedChange={(v) => set('isBotActive', v)} /><span className="text-sm text-slate-700">Bot Aktif</span></div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
+          <Globe className="w-4 h-4 text-emerald-500" /> Zona Waktu
+        </h3>
+        <div>
+          <label className="text-sm font-medium text-slate-700 block mb-1.5">Zona Waktu Dashboard</label>
+          <select value={val('timezone', 'WIB')} onChange={(e) => set('timezone', e.target.value)} className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm">
+            <option value="WIB">WIB – UTC+7 (Jawa, Sumatera, Kalimantan Barat/Tengah)</option>
+            <option value="WITA">WITA – UTC+8 (Bali, NTB, Sulawesi, Kalimantan Timur)</option>
+            <option value="WIT">WIT – UTC+9 (Papua, Maluku)</option>
+          </select>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-6">

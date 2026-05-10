@@ -280,7 +280,7 @@ async def seed_defaults():
             ("businessInfo", ""), ("aiTemperature", 0.7), ("aiMaxTokens", 500),
             ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
             ("ruleAiEnabled", False), ("isBotActive", False),
-            ("messageRetentionDays", 90),
+            ("messageRetentionDays", 90), ("timezone", "WIB"),
         ]
         for key, default_val in required_defaults:
             try:
