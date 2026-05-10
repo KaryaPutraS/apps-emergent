@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession, getWahaWebhook, setWahaWebhook } from '../api/apiClient';
+import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession, getWahaWebhook, setWahaWebhook, debugWaha } from '../api/apiClient';
 import {
   Copy, Save, Search, Wifi, Brain, Globe, QrCode,
   Smartphone, RefreshCw, Play, Square, CheckCircle2,
@@ -293,6 +293,8 @@ const Connections = () => {
   const [backendUrl, setBackendUrl] = useState('');
   const [webhookStatus, setWebhookStatus] = useState(null); // null | 'loading' | 'set' | 'none'
   const [settingWebhook, setSettingWebhook] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
+  const [debugging, setDebugging] = useState(false);
 
   useEffect(() => {
     getConfig().then(data => {
@@ -329,6 +331,18 @@ const Connections = () => {
       setWebhookStatus(d.webhooks?.length > 0 ? 'set' : 'none');
     } catch {
       setWebhookStatus('none');
+    }
+  };
+
+  const handleDebug = async () => {
+    setDebugging(true);
+    try {
+      const d = await debugWaha();
+      setDebugInfo(d);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal menjalankan debug.');
+    } finally {
+      setDebugging(false);
     }
   };
 
@@ -473,6 +487,24 @@ const Connections = () => {
               Pastikan session WhatsApp sudah aktif sebelum memasang webhook.
               Webhook akan menerima semua pesan masuk dan mengirimkannya ke chatbot.
             </p>
+
+            {/* Debug section */}
+            <div className="border-t border-slate-100 pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-slate-400">Debug WAHA API</p>
+                <Button size="sm" variant="ghost" onClick={handleDebug} disabled={debugging} className="h-7 px-2 text-xs text-slate-400 hover:text-slate-600 gap-1">
+                  {debugging ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                  Jalankan Debug
+                </Button>
+              </div>
+              {debugInfo && (
+                <div className="bg-slate-900 rounded-lg p-3 max-h-64 overflow-y-auto">
+                  <pre className="text-xs text-emerald-400 whitespace-pre-wrap break-all">
+                    {JSON.stringify(debugInfo, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

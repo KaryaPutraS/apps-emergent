@@ -370,6 +370,11 @@ export const getWahaWebhook = async () => {
   return data;
 };
 
+export const debugWaha = async () => {
+  const { data } = await apiClient.get('/waha/debug');
+  return data;
+};
+
 export const setWahaWebhook = async () => {
   const { data } = await apiClient.post('/waha/webhook');
   return data;

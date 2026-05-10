@@ -1553,6 +1553,32 @@ async def waha_get_webhook(current_user: Dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+@api_router.get("/waha/debug")
+async def waha_debug(token: str = Depends(validate_token)):
+    """Return raw WAHA session info and available routes for debugging."""
+    waha_url, session, api_key = await get_waha_config()
+    results = {}
+    endpoints_to_probe = [
+        ("GET", f"/api/sessions/{session}"),
+        ("GET", f"/api/sessions"),
+        ("GET", f"/api/{session}/webhook"),
+        ("GET", f"/api/version"),
+        ("GET", f"/api/server/version"),
+        ("GET", f"/api/swagger.json"),
+    ]
+    async with httpx.AsyncClient(timeout=8) as client:
+        for method, path in endpoints_to_probe:
+            try:
+                r = await client.request(method, f"{waha_url}{path}", headers=waha_headers(api_key))
+                try:
+                    body = r.json()
+                except Exception:
+                    body = r.text[:300]
+                results[f"{method} {path}"] = {"status": r.status_code, "body": body}
+            except Exception as e:
+                results[f"{method} {path}"] = {"error": str(e)}
+    return results
+
 @api_router.post("/waha/webhook")
 async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
     waha_url, session, api_key = await get_waha_config()
@@ -1572,39 +1598,50 @@ async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
     events = ["message", "message.any", "session.status", "message.reaction"]
 
     errors = []
+    webhook_body_v1 = {"config": {"webhooks": [{"url": webhook_url, "events": events}]}}
+    webhook_body_v2 = {"url": webhook_url, "events": events}
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Try WAHA Plus: PATCH /api/sessions/{session}
-            r = await client.patch(
-                f"{waha_url}/api/sessions/{session}",
-                json={"config": {"webhooks": [{"url": webhook_url, "events": events}]}},
-                headers=waha_headers(api_key),
-            )
-            if r.status_code in (200, 201):
-                return {"success": True, "webhookUrl": webhook_url}
+            # 1. PATCH /api/sessions/{session}  (WAHA Plus new)
+            r = await client.patch(f"{waha_url}/api/sessions/{session}", json=webhook_body_v1, headers=waha_headers(api_key))
+            if r.status_code in (200, 201): return {"success": True, "webhookUrl": webhook_url}
             errors.append(f"PATCH sessions: {r.status_code}")
 
-            # Fallback: PUT /api/{session}/webhook
-            r2 = await client.put(
-                f"{waha_url}/api/{session}/webhook",
-                json={"url": webhook_url, "events": events},
+            # 2. PUT /api/sessions/{session}  (WAHA Plus alt)
+            r = await client.put(f"{waha_url}/api/sessions/{session}", json=webhook_body_v1, headers=waha_headers(api_key))
+            if r.status_code in (200, 201): return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"PUT sessions: {r.status_code}")
+
+            # 3. PUT /api/{session}/webhook
+            r = await client.put(f"{waha_url}/api/{session}/webhook", json=webhook_body_v2, headers=waha_headers(api_key))
+            if r.status_code in (200, 201): return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"PUT {session}/webhook: {r.status_code}")
+
+            # 4. POST /api/{session}/webhook
+            r = await client.post(f"{waha_url}/api/{session}/webhook", json=webhook_body_v2, headers=waha_headers(api_key))
+            if r.status_code in (200, 201): return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"POST {session}/webhook: {r.status_code}")
+
+            # 5. POST /api/sessions/{session}/config/webhook
+            r = await client.post(f"{waha_url}/api/sessions/{session}/config/webhook", json=webhook_body_v2, headers=waha_headers(api_key))
+            if r.status_code in (200, 201): return {"success": True, "webhookUrl": webhook_url}
+            errors.append(f"POST sessions config/webhook: {r.status_code}")
+
+            # 6. Re-create session with webhook embedded (stop → create with webhook)
+            # First stop
+            await client.post(f"{waha_url}/api/sessions/{session}/stop", headers=waha_headers(api_key))
+            await client.delete(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
+            # Create with webhook
+            r = await client.post(
+                f"{waha_url}/api/sessions",
+                json={"name": session, "start": True, "config": {"webhooks": [{"url": webhook_url, "events": events}]}},
                 headers=waha_headers(api_key),
             )
-            if r2.status_code in (200, 201):
-                return {"success": True, "webhookUrl": webhook_url}
-            errors.append(f"PUT webhook: {r2.status_code}")
+            if r.status_code in (200, 201): return {"success": True, "webhookUrl": webhook_url, "note": "Session dibuat ulang dengan webhook. Scan ulang QR jika diminta."}
+            errors.append(f"POST sessions (recreate): {r.status_code}")
 
-            # Fallback: POST /api/{session}/config/webhook
-            r3 = await client.post(
-                f"{waha_url}/api/{session}/config/webhook",
-                json={"url": webhook_url, "events": events},
-                headers=waha_headers(api_key),
-            )
-            if r3.status_code in (200, 201):
-                return {"success": True, "webhookUrl": webhook_url}
-            errors.append(f"POST config/webhook: {r3.status_code}")
-
-        raise HTTPException(status_code=502, detail=f"WAHA tidak mendukung endpoint webhook yang dicoba: {'; '.join(errors)}")
+        raise HTTPException(status_code=502, detail=f"WAHA tidak mendukung endpoint webhook: {'; '.join(errors)}. Coba cek /api/waha/debug untuk info lebih lanjut.")
     except HTTPException:
         raise
     except httpx.ConnectError:
