@@ -29,6 +29,7 @@ import Documentation from '../pages/Documentation';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
+  { id: 'docs', label: 'Dokumentasi', icon: BookMarked, group: 'main' },
 ];
 
 const userNavItems = [
@@ -91,9 +92,10 @@ const Layout = () => {
   const navItems = isSuperAdmin ? superadminNavItems : userNavItems;
   const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
 
-  // Superadmin always lands on user-management; user never accesses it
+  // Superadmin can access user-management and docs; user never accesses user-management
+  const superadminAllowed = ['user-management', 'docs'];
   const safeTab = isSuperAdmin
-    ? (activeTab === 'user-management' ? 'user-management' : 'user-management')
+    ? (superadminAllowed.includes(activeTab) ? activeTab : 'user-management')
     : (activeTab === 'user-management' ? 'dashboard' : activeTab);
   const ActivePage = pageComponents[safeTab] || Dashboard;
 
