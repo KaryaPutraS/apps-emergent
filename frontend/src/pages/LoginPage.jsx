@@ -98,9 +98,6 @@ const LoginPage = () => {
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                <p className="text-xs text-slate-400 mt-1.5">
-                  Akun default: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-emerald-600 font-mono">admin</code> / <code className="bg-slate-100 px-1.5 py-0.5 rounded text-emerald-600 font-mono">admin123</code>
-                </p>
               </div>
 
               {error && (

@@ -4,6 +4,8 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import re
+import time
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -12,6 +14,7 @@ from datetime import datetime, timedelta
 import secrets
 import httpx
 import hashlib
+import bcrypt
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -163,21 +166,27 @@ class ImageUpload(BaseModel):
 SESSION_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_PASSWORD = "admin123"
 
-def hash_password(password: str, salt: str = None) -> str:
-    if salt is None:
-        salt = secrets.token_hex(16)
-    hashed = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return f"{salt}${hashed}"
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
 
 def check_password(password: str, stored_hash: str) -> bool:
-    if "$" not in stored_hash:
-        return password == stored_hash
-    parts = stored_hash.split("$", 1)
-    if len(parts) != 2:
-        return password == stored_hash
-    salt = parts[0]
-    expected = hash_password(password, salt)
-    return expected == stored_hash
+    if not stored_hash:
+        return False
+    try:
+        # bcrypt hash (new format)
+        if stored_hash.startswith(('$2b$', '$2a$', '$2y$')):
+            return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+        # Legacy SHA-256 format: {hex_salt}${sha256_hex}
+        if "$" in stored_hash:
+            parts = stored_hash.split("$", 1)
+            if len(parts) == 2:
+                salt = parts[0]
+                legacy_hash = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
+                return f"{salt}${legacy_hash}" == stored_hash
+        # Plain text (very old, should not exist in production)
+        return secrets.compare_digest(password, stored_hash)
+    except Exception:
+        return False
 
 async def ensure_admin_password():
     config = await db.config.find_one({"key": "admin_password_hash"})
@@ -186,8 +195,9 @@ async def ensure_admin_password():
         await db.config.insert_one({"key": "admin_password_hash", "value": hashed, "updated_at": datetime.utcnow()})
     else:
         stored = config.get("value", "")
-        if stored.startswith("$2b$") or stored.startswith("$2a$"):
-            logger.info("Migrating password hash from bcrypt to SHA-256...")
+        # Upgrade legacy SHA-256 hash to bcrypt (more secure)
+        if stored and not stored.startswith(('$2b$', '$2a$', '$2y$')):
+            logger.info("Upgrading legacy password hash to bcrypt...")
             hashed = hash_password(DEFAULT_PASSWORD)
             await db.config.update_one(
                 {"key": "admin_password_hash"},
@@ -592,16 +602,41 @@ async def shutdown():
 # AUTH ENDPOINTS
 # ============================================================
 
+_login_attempts: dict = {}  # ip -> [timestamp, ...]
+_LOGIN_MAX = 10
+_LOGIN_WINDOW = 300  # 5 menit
+
+def _is_rate_limited(ip: str) -> bool:
+    now = time.time()
+    _login_attempts[ip] = [t for t in _login_attempts.get(ip, []) if now - t < _LOGIN_WINDOW]
+    return len(_login_attempts.get(ip, [])) >= _LOGIN_MAX
+
+def _record_attempt(ip: str):
+    _login_attempts.setdefault(ip, []).append(time.time())
+
 @api_router.post("/auth/login", response_model=LoginResponse)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if _is_rate_limited(client_ip):
+        raise HTTPException(status_code=429, detail="Terlalu banyak percobaan login. Coba lagi 5 menit.")
+
     username = req.username.strip().lower() if req.username else "admin"
 
     # Check users collection first
     user = await db.users.find_one({"username": username, "isActive": True})
     if user:
         if not check_password(req.password, user.get("passwordHash", "")):
+            _record_attempt(client_ip)
             await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk user: {username}")
             return LoginResponse(success=False, message="Username atau password salah.")
+
+        # Upgrade hash from legacy SHA-256 to bcrypt if needed
+        stored_hash = user.get("passwordHash", "")
+        if stored_hash and not stored_hash.startswith(('$2b$', '$2a$', '$2y$')):
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": {"passwordHash": hash_password(req.password)}}
+            )
 
         token = await create_session(
             user_id=str(user["id"]),
@@ -1131,10 +1166,11 @@ async def get_contacts(search: str = "", current_user: Dict = Depends(get_curren
     uid = current_user["userId"]
     query: dict = {"userId": uid}
     if search:
+        escaped = re.escape(search)
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"chatId": {"$regex": search}},
-            {"tag": {"$regex": search, "$options": "i"}},
+            {"name": {"$regex": escaped, "$options": "i"}},
+            {"chatId": {"$regex": escaped}},
+            {"tag": {"$regex": escaped, "$options": "i"}},
         ]
     contacts = await db.contacts.find(query, {"_id": 0}).sort("lastSeen", -1).to_list(500)
     return contacts
@@ -1179,7 +1215,7 @@ async def check_broadcast(req: BroadcastCheck, current_user: Dict = Depends(get_
     if req.target == "all":
         count = await db.contacts.count_documents({"userId": uid, "isBlocked": {"$ne": True}})
     elif req.target == "tag" and req.tag:
-        tags = [t.strip() for t in req.tag.split(",")]
+        tags = [re.escape(t.strip()) for t in req.tag.split(",")]
         query = {"userId": uid, "isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]}
         count = await db.contacts.count_documents(query)
     elif req.target == "custom" and req.customNumbers:
@@ -1197,7 +1233,7 @@ async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_cu
     if req.target == "all":
         contacts = await db.contacts.find({"userId": uid, "isBlocked": {"$ne": True}}, {"chatId": 1}).to_list(500)
     elif req.target == "tag" and req.tag:
-        tags = [t.strip() for t in req.tag.split(",")]
+        tags = [re.escape(t.strip()) for t in req.tag.split(",")]
         contacts = await db.contacts.find(
             {"userId": uid, "isBlocked": {"$ne": True}, "$or": [{"tag": {"$regex": t, "$options": "i"}} for t in tags]},
             {"chatId": 1}
@@ -1886,7 +1922,7 @@ async def _call_openai_compat(base_url: str, model: str, api_key: str, system_pr
 
 async def _call_gemini(model: str, api_key: str, system_prompt: str,
                        messages: list, temperature: float, max_tokens: int) -> str:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     contents = []
     for m in messages:
         role = "user" if m["role"] == "user" else "model"
@@ -1896,8 +1932,10 @@ async def _call_gemini(model: str, api_key: str, system_prompt: str,
         "contents": contents,
         "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
     }
+    # Send key in header, not URL query param (prevents leaking in logs)
+    headers = {"x-goog-api-key": api_key}
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(url, json=body)
+        r = await client.post(url, json=body, headers=headers)
         r.raise_for_status()
         data = r.json()
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -2155,10 +2193,39 @@ async def root():
 # Include router and middleware
 app.include_router(api_router)
 
+# CORS — baca dari env var ALLOWED_ORIGINS (pisah koma), default "*" hanya untuk dev
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Api-Key"],
 )
+
+# Security headers
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse as _JSONResponse
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        return response
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    MAX_BODY = 5 * 1024 * 1024  # 5 MB
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > self.MAX_BODY:
+            return _JSONResponse(status_code=413, content={"detail": "Payload terlalu besar (maks 5MB)"})
+        return await call_next(request)
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware)
