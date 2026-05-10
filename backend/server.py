@@ -1468,10 +1468,9 @@ async def receive_webhook(token: str, request: Request):
     except Exception:
         payload = {}
 
-    await add_log("WEBHOOK_IN", f"Webhook masuk untuk user '{user['username']}': event={payload.get('event','?')}")
-
     event = payload.get("event", "")
     msg_payload = payload.get("payload", {})
+    await add_log("WEBHOOK_IN", f"[{user['username']}] event={event} type={msg_payload.get('type','-')} fromMe={msg_payload.get('fromMe','-')} from={msg_payload.get('from','-')}")
 
     # Only process incoming text messages
     if event not in ("message", "message.any"):
@@ -1485,8 +1484,15 @@ async def receive_webhook(token: str, request: Request):
     body = (msg_payload.get("body") or msg_payload.get("text") or "").strip()
     msg_type = msg_payload.get("type", "chat")
 
-    if not chat_id or not body or msg_type not in ("chat", "text"):
+    if not chat_id or not body:
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Pesan dilewati: chat_id='{chat_id}' body='{body[:50]}' type={msg_type}")
         return {"success": True, "processed": False, "reason": "no_text"}
+
+    if msg_type not in ("chat", "text"):
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Tipe pesan tidak didukung: {msg_type} dari {chat_id}")
+        return {"success": True, "processed": False, "reason": f"unsupported_type:{msg_type}"}
+
+    await add_log("MESSAGE_IN", f"[{user['username']}] Pesan dari {chat_id}: '{body[:80]}'")
 
     # Store incoming message
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -1515,11 +1521,14 @@ async def receive_webhook(token: str, request: Request):
     # Check if contact is blocked
     contact = await db.contacts.find_one({"chatId": chat_id, "userId": str(user.get("id", ""))})
     if contact and contact.get("isBlocked"):
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Kontak {chat_id} diblokir")
         return {"success": True, "processed": False, "reason": "blocked"}
 
     # Check if bot is active
     bot_active_doc = await db.config.find_one({"key": "isBotActive"})
-    if not bot_active_doc or not bot_active_doc.get("value"):
+    bot_is_active = bot_active_doc.get("value") if bot_active_doc else False
+    if not bot_is_active:
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Bot tidak aktif — aktifkan di menu Setting → Bot Aktif")
         return {"success": True, "processed": False, "reason": "bot_inactive"}
 
     # Get all config at once
@@ -1589,6 +1598,11 @@ async def receive_webhook(token: str, request: Request):
         max_tokens = int(cfg.get("aiMaxTokens") or 500)
         memory_limit = int(cfg.get("memoryLimit") or 10)
 
+        if not provider:
+            await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Set di menu Koneksi → AI Provider.")
+        elif not ai_api_key and provider != "OLLAMA":
+            await add_log("AI_ERROR", f"[{user['username']}] AI API Key belum diisi untuk provider {provider}. Set di menu Koneksi → AI Provider.")
+
         if business_info:
             system_prompt += f"\n\nInformasi bisnis:\n{business_info}"
         if knowledge_context:
@@ -1601,20 +1615,25 @@ async def receive_webhook(token: str, request: Request):
         history_docs.reverse()
 
         messages = []
-        for h in history_docs[:-1]:  # exclude current message
+        for h in history_docs[:-1]:
             role = "user" if h["direction"] == "incoming" else "assistant"
             messages.append({"role": role, "content": h["message"]})
         messages.append({"role": "user", "content": body})
 
+        await add_log("AI_CALL", f"[{user['username']}] Memanggil AI {provider}/{model} untuk {chat_id}")
         reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
         response_type = "ai"
 
     if not reply_text:
+        await add_log("AI_ERROR", f"[{user['username']}] AI tidak menghasilkan balasan untuk {chat_id}")
         reply_text = "Maaf, saya tidak dapat memproses pesan Anda saat ini."
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
+    await add_log("MESSAGE_OUT", f"[{user['username']}] Mengirim balasan ke {chat_id} via WAHA [{waha_session}]: '{reply_text[:80]}'")
     if waha_url:
         await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, reply_text)
+    else:
+        await add_log("WAHA_ERROR", f"[{user['username']}] WAHA URL kosong, balasan tidak terkirim!")
 
     # Store outgoing message
     await db.messages.insert_one({
