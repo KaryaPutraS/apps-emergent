@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -257,7 +257,7 @@ async def seed_defaults():
             {"key": "backendUrl", "value": ""},
             {"key": "aiProvider", "value": ""},
             {"key": "aiModel", "value": ""},
-            {"key": "hasAiApiKey", "value": False},
+            {"key": "aiApiKey", "value": ""},
             {"key": "ollamaUrl", "value": ""},
             {"key": "systemPrompt", "value": ""},
             {"key": "businessInfo", "value": ""},
@@ -1422,13 +1422,284 @@ async def get_user_activity(user_id: str, limit: int = 50, admin: Dict = Depends
     return activities
 
 @app.post("/webhook/{token}")
-async def receive_webhook(token: str, payload: Dict = None):
+async def receive_webhook(token: str, request: Request):
     user = await db.users.find_one({"webhookToken": token, "isActive": True}, {"_id": 0, "passwordHash": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Webhook token tidak valid.")
-    await log_user_activity(user["id"], user["username"], "WEBHOOK_RECEIVED", f"Webhook diterima")
-    await add_log("WEBHOOK_IN", f"Webhook masuk untuk user '{user['username']}'")
-    return {"success": True, "userId": user["id"], "username": user["username"]}
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    await add_log("WEBHOOK_IN", f"Webhook masuk untuk user '{user['username']}': event={payload.get('event','?')}")
+
+    event = payload.get("event", "")
+    msg_payload = payload.get("payload", {})
+
+    # Only process incoming text messages
+    if event not in ("message", "message.any"):
+        return {"success": True, "processed": False, "reason": "event_ignored"}
+
+    from_me = msg_payload.get("fromMe", False)
+    if from_me:
+        return {"success": True, "processed": False, "reason": "from_me"}
+
+    chat_id = msg_payload.get("from") or msg_payload.get("chatId", "")
+    body = (msg_payload.get("body") or msg_payload.get("text") or "").strip()
+    msg_type = msg_payload.get("type", "chat")
+
+    if not chat_id or not body or msg_type not in ("chat", "text"):
+        return {"success": True, "processed": False, "reason": "no_text"}
+
+    # Store incoming message
+    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    await db.messages.insert_one({
+        "timestamp": now_str,
+        "chatId": chat_id,
+        "userId": str(user.get("id", "")),
+        "direction": "incoming",
+        "message": body[:500],
+        "responseType": "incoming",
+        "tokensUsed": 0,
+    })
+
+    # Update/create contact
+    await db.contacts.update_one(
+        {"chatId": chat_id, "userId": str(user.get("id", ""))},
+        {"$set": {
+            "chatId": chat_id,
+            "userId": str(user.get("id", "")),
+            "lastSeen": now_str,
+            "name": msg_payload.get("notifyName") or msg_payload.get("pushName") or chat_id.replace("@c.us", ""),
+        }, "$setOnInsert": {"isBlocked": False, "tag": "", "createdAt": now_str}},
+        upsert=True
+    )
+
+    # Check if contact is blocked
+    contact = await db.contacts.find_one({"chatId": chat_id, "userId": str(user.get("id", ""))})
+    if contact and contact.get("isBlocked"):
+        return {"success": True, "processed": False, "reason": "blocked"}
+
+    # Check if bot is active
+    bot_active_doc = await db.config.find_one({"key": "isBotActive"})
+    if not bot_active_doc or not bot_active_doc.get("value"):
+        return {"success": True, "processed": False, "reason": "bot_inactive"}
+
+    # Get all config at once
+    config_keys = ["wahaUrl", "wahaSession", "wahaApiKey", "aiProvider", "aiModel",
+                   "aiApiKey", "ollamaUrl", "systemPrompt", "businessInfo",
+                   "aiTemperature", "aiMaxTokens", "memoryLimit"]
+    cfg = {}
+    async for doc in db.config.find({"key": {"$in": config_keys}}):
+        cfg[doc["key"]] = doc.get("value", "")
+
+    waha_url = cfg.get("wahaUrl", "").rstrip("/")
+    waha_session = cfg.get("wahaSession", "default") or "default"
+    waha_api_key = cfg.get("wahaApiKey", "")
+
+    # ── Step 1: Rules engine ──────────────────────────────────
+    reply_text = None
+    response_type = "ai"
+    msg_lower = body.lower()
+
+    rules = await db.rules.find({"isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    for rule in rules:
+        trigger = rule.get("triggerValue", "").strip()
+        trigger_type = rule.get("triggerType", "contains")
+        matched = False
+
+        if trigger_type == "contains":
+            keywords = [k.strip().lower() for k in trigger.split("|") if k.strip()]
+            matched = any(kw in msg_lower for kw in keywords)
+        elif trigger_type == "exact":
+            matched = msg_lower == trigger.lower()
+        elif trigger_type == "startswith":
+            keywords = [k.strip().lower() for k in trigger.split("|") if k.strip()]
+            matched = any(msg_lower.startswith(kw) for kw in keywords)
+
+        if matched:
+            mode = rule.get("responseMode", "direct")
+            if mode == "direct":
+                reply_text = rule.get("response", "")
+                response_type = "rule"
+                await add_log("RULE_HIT", f"Rule '{rule['name']}' matched untuk {chat_id}")
+                break
+            # mode == "ai" → fall through to AI with rule context
+            break
+
+    # ── Step 2: Knowledge base context ───────────────────────
+    knowledge_context = ""
+    if not reply_text:
+        items = await db.knowledge.find({"isActive": True}, {"_id": 0}).to_list(100)
+        matched_items = []
+        for item in items:
+            keywords = [k.strip().lower() for k in item.get("keyword", "").split("|") if k.strip()]
+            if any(kw in msg_lower for kw in keywords):
+                matched_items.append(item)
+        if matched_items:
+            knowledge_context = "\n".join(
+                f"[{i['category']}]: {i['content']}" for i in matched_items[:3]
+            )
+
+    # ── Step 3: AI call ──────────────────────────────────────
+    if not reply_text:
+        provider = cfg.get("aiProvider", "").upper()
+        model = cfg.get("aiModel", "")
+        ai_api_key = cfg.get("aiApiKey", "")
+        system_prompt = cfg.get("systemPrompt", "") or "Kamu adalah asisten virtual yang membantu dan ramah."
+        business_info = cfg.get("businessInfo", "")
+        temperature = float(cfg.get("aiTemperature") or 0.7)
+        max_tokens = int(cfg.get("aiMaxTokens") or 500)
+        memory_limit = int(cfg.get("memoryLimit") or 10)
+
+        if business_info:
+            system_prompt += f"\n\nInformasi bisnis:\n{business_info}"
+        if knowledge_context:
+            system_prompt += f"\n\nGunakan informasi berikut untuk menjawab:\n{knowledge_context}"
+
+        # Get conversation history for memory
+        history_docs = await db.messages.find(
+            {"chatId": chat_id, "direction": {"$in": ["incoming", "outgoing"]}}
+        ).sort("timestamp", -1).to_list(memory_limit * 2)
+        history_docs.reverse()
+
+        messages = []
+        for h in history_docs[:-1]:  # exclude current message
+            role = "user" if h["direction"] == "incoming" else "assistant"
+            messages.append({"role": role, "content": h["message"]})
+        messages.append({"role": "user", "content": body})
+
+        reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
+        response_type = "ai"
+
+    if not reply_text:
+        reply_text = "Maaf, saya tidak dapat memproses pesan Anda saat ini."
+
+    # ── Step 4: Send reply via WAHA ──────────────────────────
+    if waha_url:
+        await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, reply_text)
+
+    # Store outgoing message
+    await db.messages.insert_one({
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "chatId": chat_id,
+        "userId": str(user.get("id", "")),
+        "direction": "outgoing",
+        "message": reply_text[:500],
+        "responseType": response_type,
+        "tokensUsed": 0,
+    })
+
+    await add_log("MESSAGE_OUT", f"Balas ke {chat_id}: [{response_type}] {reply_text[:80]}...")
+    return {"success": True, "processed": True, "responseType": response_type}
+
+
+async def send_waha_text(waha_url: str, session: str, api_key: str, chat_id: str, text: str):
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-Api-Key"] = api_key
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Try sendText endpoint (common WAHA format)
+            r = await client.post(
+                f"{waha_url}/api/sendText",
+                json={"chatId": chat_id, "text": text, "session": session},
+                headers=headers,
+            )
+            if r.status_code in (200, 201):
+                return
+            # Fallback: messages/send
+            await client.post(
+                f"{waha_url}/api/{session}/messages/send",
+                json={"chatId": chat_id, "body": text},
+                headers=headers,
+            )
+    except Exception as e:
+        await add_log("WAHA_SEND_ERROR", f"Gagal kirim ke {chat_id}: {str(e)}")
+
+
+async def call_ai(provider: str, model: str, api_key: str, system_prompt: str,
+                  messages: list, temperature: float = 0.7, max_tokens: int = 500,
+                  ollama_url: str = "") -> str:
+    try:
+        if provider == "GEMINI":
+            return await _call_gemini(model or "gemini-2.0-flash", api_key, system_prompt, messages, temperature, max_tokens)
+        elif provider in ("OPENAI", "GROQ", "OPENROUTER", "DEEPSEEK"):
+            base_urls = {
+                "OPENAI": "https://api.openai.com/v1",
+                "GROQ": "https://api.groq.com/openai/v1",
+                "OPENROUTER": "https://openrouter.ai/api/v1",
+                "DEEPSEEK": "https://api.deepseek.com/v1",
+            }
+            return await _call_openai_compat(base_urls[provider], model, api_key, system_prompt, messages, temperature, max_tokens)
+        elif provider == "ANTHROPIC":
+            return await _call_anthropic(model or "claude-3-5-haiku-20241022", api_key, system_prompt, messages, max_tokens)
+        elif provider == "OLLAMA":
+            return await _call_openai_compat(f"{ollama_url.rstrip('/')}/v1", model, "", system_prompt, messages, temperature, max_tokens)
+        else:
+            await add_log("AI_ERROR", f"Provider tidak dikenal: {provider}")
+            return ""
+    except Exception as e:
+        await add_log("AI_ERROR", f"AI call error ({provider}): {str(e)[:200]}")
+        return ""
+
+
+async def _call_openai_compat(base_url: str, model: str, api_key: str, system_prompt: str,
+                               messages: list, temperature: float, max_tokens: int) -> str:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    body = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}] + messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(f"{base_url}/chat/completions", json=body, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+
+async def _call_gemini(model: str, api_key: str, system_prompt: str,
+                       messages: list, temperature: float, max_tokens: int) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    contents = []
+    for m in messages:
+        role = "user" if m["role"] == "user" else "model"
+        contents.append({"role": role, "parts": [{"text": m["content"]}]})
+    body = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, json=body)
+        r.raise_for_status()
+        data = r.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+async def _call_anthropic(model: str, api_key: str, system_prompt: str,
+                           messages: list, max_tokens: int) -> str:
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system_prompt,
+        "messages": messages,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post("https://api.anthropic.com/v1/messages", json=body, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+        return data["content"][0]["text"].strip()
 
 # ============================================================
 # WAHA PROXY
