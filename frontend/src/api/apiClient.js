@@ -342,6 +342,30 @@ export const uploadDocImage = async (dataUrl) => {
 };
 
 // ============================================================
+// WAHA
+// ============================================================
+
+export const getWahaStatus = async () => {
+  const { data } = await apiClient.get('/waha/status');
+  return data;
+};
+
+export const getWahaQr = async () => {
+  const { data } = await apiClient.get('/waha/qr');
+  return data;
+};
+
+export const startWahaSession = async () => {
+  const { data } = await apiClient.post('/waha/start');
+  return data;
+};
+
+export const stopWahaSession = async () => {
+  const { data } = await apiClient.post('/waha/stop');
+  return data;
+};
+
+// ============================================================
 // RESET
 // ============================================================
 

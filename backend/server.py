@@ -252,8 +252,8 @@ async def seed_defaults():
     if config_count == 0:
         defaults = [
             {"key": "wahaUrl", "value": ""},
-            {"key": "wahaSession", "value": ""},
-            {"key": "hasWahaApiKey", "value": False},
+            {"key": "wahaSession", "value": "default"},
+            {"key": "wahaApiKey", "value": ""},
             {"key": "aiProvider", "value": ""},
             {"key": "aiModel", "value": ""},
             {"key": "hasAiApiKey", "value": False},
@@ -1423,6 +1423,112 @@ async def receive_webhook(token: str, payload: Dict = None):
     await log_user_activity(user["id"], user["username"], "WEBHOOK_RECEIVED", f"Webhook diterima")
     await add_log("WEBHOOK_IN", f"Webhook masuk untuk user '{user['username']}'")
     return {"success": True, "userId": user["id"], "username": user["username"]}
+
+# ============================================================
+# WAHA PROXY
+# ============================================================
+
+async def get_waha_config():
+    keys = ["wahaUrl", "wahaSession", "wahaApiKey"]
+    result = {}
+    for key in keys:
+        doc = await db.config.find_one({"key": key})
+        result[key] = doc["value"] if doc else ""
+    url = result.get("wahaUrl", "").rstrip("/")
+    session = result.get("wahaSession", "default") or "default"
+    api_key = result.get("wahaApiKey", "")
+    if not url:
+        raise HTTPException(status_code=400, detail="WAHA URL belum dikonfigurasi.")
+    return url, session, api_key
+
+def waha_headers(api_key: str) -> dict:
+    h = {"Content-Type": "application/json"}
+    if api_key:
+        h["X-Api-Key"] = api_key
+    return h
+
+@api_router.get("/waha/status")
+async def waha_status(token: str = Depends(validate_token)):
+    waha_url, session, api_key = await get_waha_config()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
+            if r.status_code == 404:
+                return {"status": "STOPPED", "session": session}
+            r.raise_for_status()
+            data = r.json()
+            return {
+                "status": data.get("status", "UNKNOWN"),
+                "session": session,
+                "me": data.get("me"),
+            }
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@api_router.get("/waha/qr")
+async def waha_qr(token: str = Depends(validate_token)):
+    waha_url, session, api_key = await get_waha_config()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                f"{waha_url}/api/{session}/auth/qr",
+                headers={**waha_headers(api_key), "Accept": "application/json"},
+            )
+            if r.status_code == 404:
+                return {"qr": None, "message": "Session belum dimulai."}
+            r.raise_for_status()
+            data = r.json()
+            qr_value = data.get("value") or data.get("qr") or data.get("data")
+            return {"qr": qr_value}
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@api_router.post("/waha/start")
+async def waha_start(token: str = Depends(validate_token)):
+    waha_url, session, api_key = await get_waha_config()
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Try to start existing session first
+            r = await client.post(
+                f"{waha_url}/api/sessions/{session}/start",
+                headers=waha_headers(api_key),
+            )
+            if r.status_code == 404:
+                # Session doesn't exist, create it
+                r2 = await client.post(
+                    f"{waha_url}/api/sessions",
+                    json={"name": session, "start": True},
+                    headers=waha_headers(api_key),
+                )
+                r2.raise_for_status()
+            elif r.status_code not in (200, 201):
+                r.raise_for_status()
+        return {"success": True, "message": "Session dimulai."}
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@api_router.post("/waha/stop")
+async def waha_stop(token: str = Depends(validate_token)):
+    waha_url, session, api_key = await get_waha_config()
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                f"{waha_url}/api/sessions/{session}/stop",
+                headers=waha_headers(api_key),
+            )
+            if r.status_code not in (200, 201, 404):
+                r.raise_for_status()
+        return {"success": True, "message": "Session dihentikan."}
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Tidak bisa terhubung ke WAHA server.")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 # ============================================================
 # HEALTH CHECK
