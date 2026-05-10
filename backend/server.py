@@ -1470,19 +1470,33 @@ async def receive_webhook(token: str, request: Request):
 
     event = payload.get("event", "")
     msg_payload = payload.get("payload", {})
-    await add_log("WEBHOOK_IN", f"[{user['username']}] event={event} type={msg_payload.get('type','-')} fromMe={msg_payload.get('fromMe','-')} from={msg_payload.get('from','-')}")
 
-    # Only process incoming text messages
+    # Skip non-message events silently (no log spam)
     if event not in ("message", "message.any"):
         return {"success": True, "processed": False, "reason": "event_ignored"}
 
     from_me = msg_payload.get("fromMe", False)
-    if from_me:
-        return {"success": True, "processed": False, "reason": "from_me"}
-
     chat_id = msg_payload.get("from") or msg_payload.get("chatId", "")
     body = (msg_payload.get("body") or msg_payload.get("text") or "").strip()
     msg_type = msg_payload.get("type", "chat")
+    msg_id = msg_payload.get("id", "")
+
+    # Skip outgoing messages to prevent loop (bot replies trigger message.any)
+    if from_me:
+        return {"success": True, "processed": False, "reason": "from_me"}
+
+    # Deduplicate: skip if this message ID was already processed recently
+    if msg_id:
+        already = await db.processed_msgs.find_one({"msgId": msg_id})
+        if already:
+            return {"success": True, "processed": False, "reason": "duplicate"}
+        await db.processed_msgs.insert_one({"msgId": msg_id, "ts": datetime.utcnow()})
+        # TTL cleanup: remove entries older than 24h
+        await db.processed_msgs.delete_many(
+            {"ts": {"$lt": datetime.utcnow() - timedelta(hours=24)}}
+        )
+
+    await add_log("WEBHOOK_IN", f"[{user['username']}] event={event} type={msg_type} fromMe={from_me} from={chat_id}")
 
     if not chat_id or not body:
         await add_log("WEBHOOK_SKIP", f"[{user['username']}] Pesan dilewati: chat_id='{chat_id}' body='{body[:50]}' type={msg_type}")
@@ -1629,7 +1643,6 @@ async def receive_webhook(token: str, request: Request):
         reply_text = "Maaf, saya tidak dapat memproses pesan Anda saat ini."
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
-    await add_log("MESSAGE_OUT", f"[{user['username']}] Mengirim balasan ke {chat_id} via WAHA [{waha_session}]: '{reply_text[:80]}'")
     if waha_url:
         await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, reply_text)
     else:
@@ -1646,7 +1659,7 @@ async def receive_webhook(token: str, request: Request):
         "tokensUsed": 0,
     })
 
-    await add_log("MESSAGE_OUT", f"Balas ke {chat_id}: [{response_type}] {reply_text[:80]}...")
+    await add_log("MESSAGE_OUT", f"[{user['username']}] Balas ke {chat_id}: [{response_type}] '{reply_text[:80]}'")
     return {"success": True, "processed": True, "responseType": response_type}
 
 
