@@ -12,7 +12,7 @@ export const useApp = () => useContext(AppContext);
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [checking, setChecking] = useState(true);
 
@@ -51,6 +51,7 @@ function App() {
     setIsLoggedIn(false);
     setCurrentUser(null);
     setActiveTab('dashboard');
+    localStorage.removeItem('activeTab');
   }, []);
 
   const contextValue = {
@@ -58,7 +59,7 @@ function App() {
     currentUser,
     setCurrentUser,
     activeTab,
-    setActiveTab,
+    setActiveTab: (tab) => { setActiveTab(tab); localStorage.setItem('activeTab', tab); },
     sidebarOpen,
     setSidebarOpen,
     login,
