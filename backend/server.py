@@ -312,6 +312,7 @@ async def seed_defaults():
     await seed_docs()
 
 async def seed_docs():
+    await db.docs.create_index("slug", unique=True)
     if await db.docs.count_documents({}) > 0:
         return
     default_docs = [
