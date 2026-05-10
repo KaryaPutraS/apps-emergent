@@ -561,6 +561,7 @@ async def login(req: LoginRequest):
                 "username": user["username"],
                 "role": user["role"],
                 "fullName": user.get("fullName", ""),
+                "webhookToken": user.get("webhookToken", ""),
             }
         )
 
@@ -589,6 +590,9 @@ async def logout(current_user: Dict = Depends(get_current_user)):
 @api_router.get("/auth/check")
 async def check_session(current_user: Dict = Depends(get_current_user)):
     license_doc = await db.license.find_one({}, {"_id": 0})
+    # Fetch webhookToken from users collection
+    user_doc = await db.users.find_one({"id": current_user["userId"]})
+    webhook_token = user_doc.get("webhookToken", "") if user_doc else ""
     return {
         "valid": True,
         "license": license_doc,
@@ -597,6 +601,7 @@ async def check_session(current_user: Dict = Depends(get_current_user)):
             "username": current_user["username"],
             "role": current_user["role"],
             "fullName": current_user["fullName"],
+            "webhookToken": webhook_token,
         }
     }
 

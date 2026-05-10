@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useApp } from '../App';
 import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession, getWahaWebhook, setWahaWebhook, debugWaha } from '../api/apiClient';
 import {
   Copy, Save, Search, Wifi, Brain, Globe, QrCode,
@@ -278,6 +279,7 @@ const QrPanel = ({ wahaConfigured, onStartSession }) => {
 
 // ─── Main Connections Page ────────────────────────────────────
 const Connections = () => {
+  const { currentUser } = useApp();
   const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState('GEMINI');
   const [model, setModel] = useState('gemini-2.0-flash');
@@ -296,6 +298,14 @@ const Connections = () => {
   const [debugInfo, setDebugInfo] = useState(null);
   const [debugging, setDebugging] = useState(false);
 
+  // Compute webhook URL from backendUrl + currentUser token
+  const myWebhookUrl = React.useMemo(() => {
+    const base = (backendUrl || '').replace(/\/$/, '');
+    const tok = currentUser?.webhookToken;
+    if (!base || !tok) return null;
+    return `${base}/webhook/${tok}`;
+  }, [backendUrl, currentUser]);
+
   useEffect(() => {
     getConfig().then(data => {
       setProvider(data.aiProvider || 'GEMINI');
@@ -306,8 +316,6 @@ const Connections = () => {
       setOllamaUrl(data.ollamaUrl || '');
       setBackendUrl(data.backendUrl || '');
       setWahaConfigured(!!data.wahaUrl);
-      const bUrl = (data.backendUrl || window.location.origin).replace(/\/$/, '');
-      setWebhookUrl(`${bUrl}/webhook/YOUR_TOKEN`);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
@@ -316,8 +324,6 @@ const Connections = () => {
     try {
       await updateConfig({ wahaUrl, wahaSession, wahaApiKey, backendUrl });
       setWahaConfigured(!!wahaUrl);
-      const bUrl = (backendUrl || window.location.origin).replace(/\/$/, '');
-      setWebhookUrl(`${bUrl}/webhook/YOUR_TOKEN`);
       toast.success('Konfigurasi WAHA tersimpan!');
     } catch {
       toast.error('Gagal menyimpan konfigurasi.');
@@ -435,11 +441,18 @@ const Connections = () => {
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
                 <Link2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                 <code className="text-xs font-mono text-slate-600 flex-1 break-all">
-                  {backendUrl
-                    ? `${backendUrl.replace(/\/$/, '')}/webhook/[token-user]`
-                    : <span className="text-slate-400 italic">Isi Backend URL di konfigurasi WAHA dahulu</span>
+                  {myWebhookUrl
+                    ? myWebhookUrl
+                    : <span className="text-slate-400 italic">
+                        {!backendUrl ? 'Isi Backend URL terlebih dahulu' : 'Token tidak tersedia — coba logout lalu login ulang'}
+                      </span>
                   }
                 </code>
+                {myWebhookUrl && (
+                  <button onClick={() => { navigator.clipboard.writeText(myWebhookUrl); toast.success('URL disalin!'); }} className="flex-shrink-0 text-slate-400 hover:text-slate-600">
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -515,13 +528,19 @@ const Connections = () => {
           <Globe className="w-4 h-4 text-emerald-500" /> Webhook URL (Manual)
         </h3>
         <p className="text-sm text-slate-500 mb-3">
-          Jika ingin set manual di WAHA, salin URL di bawah. Ganti <code className="text-xs bg-slate-100 px-1 rounded">YOUR_TOKEN</code> dengan token user dari halaman Kelola User.
+          URL webhook Anda — gunakan ini jika ingin set manual di WAHA.
         </p>
         <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
-          <code className="text-xs font-mono text-slate-600 flex-1 break-all">{webhookUrl}</code>
-          <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(webhookUrl); toast.success('URL disalin!'); }} className="flex-shrink-0 gap-1.5">
-            <Copy className="w-3.5 h-3.5" /> Copy
-          </Button>
+          <code className="text-xs font-mono text-slate-600 flex-1 break-all">
+            {myWebhookUrl || (
+              <span className="text-slate-400 italic">Isi Backend URL di Konfigurasi WAHA dan simpan terlebih dahulu</span>
+            )}
+          </code>
+          {myWebhookUrl && (
+            <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(myWebhookUrl); toast.success('URL disalin!'); }} className="flex-shrink-0 gap-1.5">
+              <Copy className="w-3.5 h-3.5" /> Copy
+            </Button>
+          )}
         </div>
       </div>
 
