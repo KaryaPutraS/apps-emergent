@@ -13,9 +13,9 @@ import { toast } from 'sonner';
 function parseWaNumber(chatId) {
   if (!chatId) return '-';
   if (chatId.includes('@g.us')) return 'Grup';
-  // Hapus semua suffix: @c.us, @lid, @s.whatsapp.net, dll
+  // LID format (@lid) = internal WhatsApp ID, bukan nomor HP
+  if (chatId.includes('@lid')) return '-';
   const num = chatId.replace(/@[\w.]+$/, '');
-  // Jika terlihat seperti nomor telepon (hanya angka, >6 digit)
   if (/^\d{6,}$/.test(num)) return '+' + num;
   return num;
 }

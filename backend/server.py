@@ -1649,6 +1649,29 @@ async def receive_webhook(token: str, request: Request):
     # Derive phone number — strip all WA suffixes (@c.us, @lid, @s.whatsapp.net)
     import re as _re
     phone_num = _re.sub(r'@[\w.]+$', '', chat_id)
+    # If LID format (@lid), the number is an internal WhatsApp ID, not a real phone number.
+    # Try to resolve via WAHA contacts API.
+    if chat_id.endswith("@lid") and waha_url:
+        try:
+            _waha_headers = {"X-Api-Key": waha_api_key} if waha_api_key else {}
+            async with httpx.AsyncClient(timeout=5) as _wc:
+                _resp = await _wc.get(
+                    f"{waha_url}/api/{waha_session}/contacts/{chat_id}",
+                    headers=_waha_headers,
+                )
+                if _resp.status_code == 200:
+                    _cdata = _resp.json()
+                    # WAHA may return 'number' or 'id' in @c.us format
+                    _resolved = _cdata.get("number") or _cdata.get("phone") or ""
+                    if not _resolved:
+                        # Try extracting from returned id if it's @c.us format
+                        _rid = _cdata.get("id", "")
+                        if _rid and "@c.us" in _rid:
+                            _resolved = _rid.replace("@c.us", "")
+                    if _resolved and _re.match(r'^\d{6,}$', _resolved.lstrip("+")):
+                        phone_num = _resolved.lstrip("+")
+        except Exception:
+            pass
     phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
 
     contact_name = (
