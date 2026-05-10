@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
   Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
-  UserCog, ShieldCheck, UserCircle
+  UserCog, ShieldCheck, UserCircle, BookMarked
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
@@ -25,6 +25,7 @@ import SettingsPage from '../pages/Settings';
 import TestCenter from '../pages/TestCenter';
 import Logs from '../pages/Logs';
 import UserManagement from '../pages/UserManagement';
+import Documentation from '../pages/Documentation';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
@@ -46,6 +47,7 @@ const userNavItems = [
   { id: 'logs', label: 'Logs', icon: ScrollText, group: 'tools' },
   { id: 'reset-data', label: 'Reset Data', icon: RotateCcw, group: 'system' },
   { id: 'settings', label: 'Setting', icon: Settings, group: 'system' },
+  { id: 'docs', label: 'Dokumentasi', icon: BookMarked, group: 'system' },
 ];
 
 const groupLabels = {
@@ -73,6 +75,7 @@ const pageComponents = {
   'user-management': UserManagement,
   'reset-data': ResetData,
   'settings': SettingsPage,
+  'docs': Documentation,
 };
 
 const roleBadge = {
@@ -269,10 +272,8 @@ const Layout = () => {
           </header>
 
           {/* Page Content */}
-          <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-            <div className="animate-fade-in">
-              <ActivePage />
-            </div>
+          <main className={`flex-1 overflow-y-auto animate-fade-in ${safeTab === 'docs' ? 'p-0 overflow-hidden flex flex-col' : 'p-4 lg:p-6'}`}>
+            <ActivePage />
           </main>
         </div>
       </div>

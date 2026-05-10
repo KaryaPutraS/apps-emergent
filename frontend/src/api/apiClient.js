@@ -296,6 +296,30 @@ export const testFullFlow = async (message) => {
 };
 
 // ============================================================
+// DOCUMENTATION
+// ============================================================
+
+export const getAllDocs = async () => {
+  const { data } = await apiClient.get('/docs');
+  return data;
+};
+
+export const getDoc = async (slug) => {
+  const { data } = await apiClient.get(`/docs/${slug}`);
+  return data;
+};
+
+export const updateDoc = async (slug, docPage) => {
+  const { data } = await apiClient.put(`/docs/${slug}`, docPage);
+  return data;
+};
+
+export const uploadDocImage = async (dataUrl) => {
+  const { data } = await apiClient.post('/docs/upload-image', { dataUrl });
+  return data;
+};
+
+// ============================================================
 // RESET
 // ============================================================
 

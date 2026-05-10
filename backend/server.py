@@ -130,6 +130,22 @@ class ChangePasswordRequest(BaseModel):
     newPassword: str
     confirmPassword: str
 
+class DocSection(BaseModel):
+    type: str = "text"  # text | step | image
+    content: Optional[str] = ""
+    stepNumber: Optional[int] = None
+    stepTitle: Optional[str] = ""
+    imageUrl: Optional[str] = ""
+    imageCaption: Optional[str] = ""
+
+class DocPage(BaseModel):
+    slug: str
+    title: str
+    sections: List[DocSection] = []
+
+class ImageUpload(BaseModel):
+    dataUrl: str  # base64 data URL
+
 # ============================================================
 # AUTH HELPERS
 # ============================================================
@@ -293,6 +309,190 @@ async def seed_defaults():
         })
 
     await ensure_admin_password()
+    await seed_docs()
+
+async def seed_docs():
+    if await db.docs.count_documents({}) > 0:
+        return
+    default_docs = [
+        {
+            "slug": "dashboard",
+            "title": "Dashboard",
+            "sections": [
+                {"type": "text", "content": "Dashboard menampilkan ringkasan aktivitas chatbot Anda secara real-time."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Total Pesan", "content": "Jumlah pesan masuk dan keluar yang diproses chatbot."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Total Kontak", "content": "Jumlah kontak unik yang pernah berinteraksi dengan chatbot."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Rules Aktif", "content": "Jumlah aturan balasan otomatis yang sedang aktif."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "AI Calls", "content": "Jumlah panggilan ke AI dan total token yang digunakan."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Grafik Aktivitas", "content": "Menampilkan tren pesan masuk dan keluar selama 7 hari terakhir."},
+                {"type": "step", "stepNumber": 6, "stepTitle": "Status Sistem", "content": "Menampilkan status bot (aktif/nonaktif), uptime, dan rata-rata waktu respons."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "license",
+            "title": "Lisensi",
+            "sections": [
+                {"type": "text", "content": "Halaman Lisensi digunakan untuk mengaktifkan dan mengelola lisensi produk."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Cek Status Lisensi", "content": "Halaman menampilkan status lisensi saat ini: aktif, expired, atau belum diaktifkan."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Aktivasi Lisensi", "content": "Masukkan license key yang diberikan, lalu klik tombol Aktivasi."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Info Lisensi", "content": "Setelah aktif, tampil nama pelanggan, nama paket, tanggal expired, dan maksimal aktivasi."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "connections",
+            "title": "Koneksi",
+            "sections": [
+                {"type": "text", "content": "Halaman Koneksi digunakan untuk menghubungkan chatbot ke WhatsApp melalui WAHA API."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Isi URL WAHA", "content": "Masukkan URL server WAHA Anda, contoh: http://localhost:3000"},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Isi API Key", "content": "Masukkan API Key WAHA jika server Anda menggunakan autentikasi."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Nama Session", "content": "Isi nama session WhatsApp (default: 'default'). Satu session = satu nomor WhatsApp."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Simpan & Scan QR", "content": "Klik Simpan lalu scan QR Code yang muncul menggunakan aplikasi WhatsApp di HP Anda."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Status Koneksi", "content": "Setelah scan berhasil, status akan berubah menjadi CONNECTED dengan tanda hijau."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "ai-agent",
+            "title": "AI Agent",
+            "sections": [
+                {"type": "text", "content": "Konfigurasi AI yang digunakan chatbot untuk membalas pesan secara cerdas."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Pilih Provider AI", "content": "Pilih provider: OpenAI, Gemini, atau Ollama (lokal). Setiap provider memiliki model berbeda."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Masukkan API Key", "content": "Isi API Key sesuai provider yang dipilih. API Key tersimpan terenkripsi."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Pilih Model", "content": "Pilih model AI, contoh: gpt-4o, gemini-2.0-flash. Model lebih canggih = lebih akurat tapi lebih mahal."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "System Prompt", "content": "Tulis instruksi kepribadian chatbot. Contoh: 'Kamu adalah customer service ramah yang menjawab singkat.'"},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Info Bisnis", "content": "Isi informasi bisnis (nama toko, alamat, jam buka) agar AI bisa menjawab pertanyaan tentang bisnis Anda."},
+                {"type": "step", "stepNumber": 6, "stepTitle": "Parameter AI", "content": "Temperature: kreativitas jawaban (0=konsisten, 1=kreatif). Max Tokens: panjang maksimal balasan."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "rules",
+            "title": "Rules Engine",
+            "sections": [
+                {"type": "text", "content": "Rules Engine memungkinkan chatbot membalas pesan secara otomatis berdasarkan aturan yang Anda buat tanpa menggunakan AI."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Tambah Rule", "content": "Klik tombol Tambah Rule, isi nama rule, trigger (kata kunci), dan balasan yang diinginkan."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Jenis Trigger", "content": "Contains: pesan mengandung kata kunci. Exact: pesan sama persis. Starts With: pesan diawali kata kunci."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Mode Respons", "content": "Direct: balas langsung dengan teks. AI Enhanced: gunakan AI untuk memperkaya balasan."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Prioritas", "content": "Angka lebih kecil = prioritas lebih tinggi. Rule dengan prioritas tertinggi dicek pertama."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Tambah Gambar", "content": "Opsional: tambahkan URL gambar untuk dikirim bersama balasan teks."},
+                {"type": "step", "stepNumber": 6, "stepTitle": "Aktif/Nonaktif", "content": "Toggle switch untuk mengaktifkan atau menonaktifkan rule tanpa menghapusnya."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "knowledge",
+            "title": "Knowledge Base",
+            "sections": [
+                {"type": "text", "content": "Knowledge Base adalah kumpulan pengetahuan yang digunakan AI untuk menjawab pertanyaan spesifik tentang bisnis Anda."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Tambah Entri", "content": "Klik Tambah, isi kategori (contoh: Produk), keyword pencarian, dan isi konten pengetahuan."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Kategori", "content": "Kelompokkan pengetahuan berdasarkan topik: Produk, Layanan, FAQ, Kebijakan, dll."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Keyword", "content": "Kata kunci yang memicu AI menggunakan entri ini. Contoh: 'harga', 'pengiriman', 'garansi'."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Konten", "content": "Isi informasi detail yang ingin diberikan AI saat keyword terdeteksi dalam pertanyaan pelanggan."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Aktif/Nonaktif", "content": "Nonaktifkan entri yang sudah tidak relevan tanpa harus menghapusnya."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "templates",
+            "title": "Template",
+            "sections": [
+                {"type": "text", "content": "Template adalah pesan siap pakai yang bisa digunakan sebagai balasan cepat atau untuk broadcast."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Tambah Template", "content": "Klik Tambah Template, beri nama, pilih kategori, dan tulis isi pesan template."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Kategori", "content": "Kelompokkan template: Sambutan, Promo, Follow-up, Pengingat, dll. untuk memudahkan pencarian."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Gunakan Template", "content": "Template bisa digunakan langsung di fitur Broadcast atau disalin untuk dipakai di aturan."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "contacts",
+            "title": "Kontak",
+            "sections": [
+                {"type": "text", "content": "Halaman Kontak menampilkan semua nomor WhatsApp yang pernah berinteraksi dengan chatbot Anda."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Daftar Kontak", "content": "Semua kontak tersimpan otomatis saat ada pesan masuk. Tampil nama, nomor, dan waktu terakhir chat."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Edit Nama & Tag", "content": "Klik kontak untuk mengedit nama tampilan, menambahkan tag (contoh: VIP, Pelanggan), dan catatan."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Tag & Filter", "content": "Gunakan tag untuk mengelompokkan kontak, memudahkan broadcast ke grup tertentu."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Blokir Kontak", "content": "Blokir kontak agar chatbot tidak membalas pesan dari nomor tersebut."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Cari Kontak", "content": "Gunakan kolom pencarian untuk menemukan kontak berdasarkan nama atau nomor."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "messages",
+            "title": "Pesan",
+            "sections": [
+                {"type": "text", "content": "Halaman Pesan menampilkan riwayat semua pesan yang masuk dan keluar melalui chatbot."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Riwayat Pesan", "content": "Tampil pesan masuk (dari pelanggan) dan pesan keluar (balasan chatbot) secara kronologis."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Filter & Cari", "content": "Filter berdasarkan nomor atau kata kunci untuk menemukan percakapan spesifik."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Retensi Pesan", "content": "Pesan disimpan sesuai pengaturan retensi (default: 90 hari) yang bisa diubah di Settings."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "broadcast",
+            "title": "Broadcast",
+            "sections": [
+                {"type": "text", "content": "Broadcast memungkinkan Anda mengirim pesan massal ke banyak kontak sekaligus."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Pilih Target", "content": "Semua Kontak: kirim ke semua. By Tag: kirim ke kontak dengan tag tertentu. Custom: masukkan nomor manual."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Tulis Pesan", "content": "Tulis pesan broadcast. Bisa menggunakan template yang sudah dibuat sebelumnya."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Cek Sebelum Kirim", "content": "Klik Cek terlebih dahulu untuk melihat jumlah penerima dan preview sebelum kirim."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Kirim Broadcast", "content": "Klik Kirim. Pesan dikirim secara bertahap (batch) untuk menghindari spam detection WhatsApp."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Batas Harian", "content": "Default maksimal 100 pesan/hari dan 10 pesan per batch. Bisa diubah di Settings."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "ai-setup",
+            "title": "AI Setup",
+            "sections": [
+                {"type": "text", "content": "AI Setup membantu Anda mengkonfigurasi chatbot secara otomatis menggunakan AI melalui percakapan natural."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Mulai Chat", "content": "Ceritakan bisnis Anda kepada AI Setup. Contoh: 'Saya punya toko baju online, sering ditanya soal ukuran dan pengiriman.'"},
+                {"type": "step", "stepNumber": 2, "stepTitle": "AI Generate Otomatis", "content": "AI akan membuat system prompt, knowledge base, dan rules secara otomatis berdasarkan cerita Anda."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Review & Apply", "content": "Review hasil yang dihasilkan AI, klik Apply untuk menerapkan konfigurasi ke chatbot Anda."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Iterasi", "content": "Lanjutkan percakapan untuk menyempurnakan konfigurasi. Contoh: 'Tambahkan info tentang metode pembayaran.'"},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "test-center",
+            "title": "Test Center",
+            "sections": [
+                {"type": "text", "content": "Test Center memungkinkan Anda menguji chatbot sebelum digunakan pelanggan sungguhan."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Test Rule", "content": "Masukkan pesan untuk mengecek apakah ada rule yang cocok dengan trigger yang dikonfigurasi."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Test Knowledge", "content": "Cek apakah AI bisa menemukan jawaban relevan dari Knowledge Base berdasarkan pertanyaan."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Test Full Flow", "content": "Simulasi alur lengkap: pesan masuk → cek rule → cek knowledge → AI generate balasan."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Baca Hasil", "content": "Hasil test menampilkan: rule yang cocok (jika ada), konteks knowledge yang digunakan, dan balasan final."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "logs",
+            "title": "Logs",
+            "sections": [
+                {"type": "text", "content": "Logs mencatat semua aktivitas sistem chatbot untuk keperluan monitoring dan debug."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Jenis Log", "content": "LOGIN_SUCCESS/FAILED: aktivitas login. MESSAGE_IN/OUT: pesan masuk/keluar. RULE_HIT: rule yang terpicu. AI_CALL: panggilan AI."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Filter Log", "content": "Filter berdasarkan jenis event atau kata kunci untuk menemukan log spesifik."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Retensi Log", "content": "Log tersimpan sesuai pengaturan retensi (default: 30 hari) yang bisa diubah di Settings."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+        {
+            "slug": "settings",
+            "title": "Setting",
+            "sections": [
+                {"type": "text", "content": "Halaman Setting berisi pengaturan umum operasional chatbot."},
+                {"type": "step", "stepNumber": 1, "stepTitle": "Bot Aktif/Nonaktif", "content": "Toggle utama untuk mengaktifkan atau menonaktifkan chatbot secara keseluruhan."},
+                {"type": "step", "stepNumber": 2, "stepTitle": "Jam Kerja", "content": "Aktifkan jam kerja agar bot hanya merespons pada jam yang ditentukan. Di luar jam kerja, kirim pesan offline."},
+                {"type": "step", "stepNumber": 3, "stepTitle": "Simulasi Mengetik", "content": "Bot akan menampilkan indikator 'mengetik...' sebelum mengirim balasan agar terasa lebih natural."},
+                {"type": "step", "stepNumber": 4, "stepTitle": "Delay Respons", "content": "Atur jeda waktu (ms) sebelum bot mengirim balasan. Default 2000ms (2 detik)."},
+                {"type": "step", "stepNumber": 5, "stepTitle": "Rate Limit", "content": "Batasi jumlah balasan per menit per kontak untuk mencegah spam. Default 15 pesan/menit."},
+                {"type": "step", "stepNumber": 6, "stepTitle": "Retensi Data", "content": "Atur berapa lama log dan pesan disimpan sebelum dihapus otomatis."},
+            ],
+            "updatedAt": datetime.utcnow().isoformat(),
+        },
+    ]
+    await db.docs.insert_many(default_docs)
 
 # ============================================================
 # STARTUP
@@ -1073,6 +1273,47 @@ async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token
     except Exception as e:
         logger.error(f"AI Setup error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# ============================================================
+# DOCUMENTATION
+# ============================================================
+
+@api_router.get("/docs")
+async def get_all_docs(token: str = Depends(validate_token)):
+    docs = await db.docs.find({}, {"_id": 0, "sections": 0}).sort("slug", 1).to_list(100)
+    return docs
+
+@api_router.get("/docs/{slug}")
+async def get_doc(slug: str, token: str = Depends(validate_token)):
+    doc = await db.docs.find_one({"slug": slug}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Dokumentasi tidak ditemukan.")
+    return doc
+
+@api_router.put("/docs/{slug}")
+async def update_doc(slug: str, req: DocPage, admin: Dict = Depends(require_superadmin)):
+    sections = [s.model_dump() for s in req.sections]
+    result = await db.docs.update_one(
+        {"slug": slug},
+        {"$set": {
+            "title": req.title,
+            "sections": sections,
+            "updatedAt": datetime.utcnow().isoformat(),
+            "updatedBy": admin["username"],
+        }},
+        upsert=True
+    )
+    return {"success": True}
+
+@api_router.post("/docs/upload-image")
+async def upload_doc_image(req: ImageUpload, admin: Dict = Depends(require_superadmin)):
+    if not req.dataUrl.startswith("data:image/"):
+        raise HTTPException(status_code=400, detail="Format gambar tidak valid.")
+    if len(req.dataUrl) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Ukuran gambar maksimal 5MB.")
+    image_id = str(uuid.uuid4())
+    await db.doc_images.insert_one({"id": image_id, "dataUrl": req.dataUrl, "createdAt": datetime.utcnow().isoformat()})
+    return {"success": True, "imageId": image_id, "dataUrl": req.dataUrl}
 
 # ============================================================
 # HEALTH CHECK
