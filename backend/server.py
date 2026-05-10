@@ -247,18 +247,17 @@ async def require_superadmin(current_user: Dict = Depends(get_current_user)) -> 
 # ============================================================
 
 async def seed_defaults():
-    # Ensure unique index on config.key to prevent duplicates
-    await db.config.create_index("key", unique=True, sparse=False)
-
-    # Clean up any duplicate config keys — keep doc with longest non-empty value
+    # Step 1: Clean up duplicate config keys FIRST (must be before unique index)
     pipeline = [{"$group": {"_id": "$key", "count": {"$sum": 1}, "ids": {"$push": "$_id"}}}]
     async for grp in db.config.aggregate(pipeline):
         if grp["count"] > 1:
-            # Keep the one with a non-empty value, delete the rest
             docs = await db.config.find({"_id": {"$in": grp["ids"]}}).to_list(20)
             docs_sorted = sorted(docs, key=lambda d: len(str(d.get("value", "") or "")), reverse=True)
             ids_to_delete = [d["_id"] for d in docs_sorted[1:]]
             await db.config.delete_many({"_id": {"$in": ids_to_delete}})
+
+    # Step 2: Now safe to create unique index
+    await db.config.create_index("key", unique=True)
 
     # Ensure all required keys exist (upsert defaults without overwriting existing values)
     required_defaults = [
