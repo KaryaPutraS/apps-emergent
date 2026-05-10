@@ -134,17 +134,24 @@ class WebhookPayload(BaseModel):
     data: Optional[Dict] = None
 
 class DocSection(BaseModel):
-    type: str = "text"  # text | step | image
+    type: str = "text"  # text | step | image | heading | video | tip
     content: Optional[str] = ""
     stepNumber: Optional[int] = None
     stepTitle: Optional[str] = ""
     imageUrl: Optional[str] = ""
     imageCaption: Optional[str] = ""
+    videoUrl: Optional[str] = ""
+    videoCaption: Optional[str] = ""
+    level: Optional[int] = 2  # for heading: 2 or 3
 
 class DocPage(BaseModel):
     slug: str
     title: str
     sections: List[DocSection] = []
+
+class CreateDocPage(BaseModel):
+    slug: str
+    title: str
 
 class ImageUpload(BaseModel):
     dataUrl: str  # base64 data URL
@@ -1343,6 +1350,32 @@ async def update_doc(slug: str, req: DocPage, admin: Dict = Depends(require_supe
         }},
         upsert=True
     )
+    return {"success": True}
+
+@api_router.post("/docs")
+async def create_doc(req: CreateDocPage, admin: Dict = Depends(require_superadmin)):
+    slug = req.slug.strip().lower().replace(" ", "-")
+    if not slug:
+        raise HTTPException(status_code=400, detail="Slug tidak boleh kosong.")
+    existing = await db.docs.find_one({"slug": slug})
+    if existing:
+        raise HTTPException(status_code=409, detail="Halaman dengan slug ini sudah ada.")
+    now = datetime.utcnow().isoformat()
+    await db.docs.insert_one({
+        "slug": slug,
+        "title": req.title,
+        "sections": [],
+        "createdAt": now,
+        "updatedAt": now,
+        "updatedBy": admin["username"],
+    })
+    return {"success": True, "slug": slug}
+
+@api_router.delete("/docs/{slug}")
+async def delete_doc(slug: str, admin: Dict = Depends(require_superadmin)):
+    result = await db.docs.delete_one({"slug": slug})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Halaman tidak ditemukan.")
     return {"success": True}
 
 @api_router.post("/docs/upload-image")

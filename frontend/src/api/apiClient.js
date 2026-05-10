@@ -326,6 +326,16 @@ export const updateDoc = async (slug, docPage) => {
   return data;
 };
 
+export const createDoc = async (slug, title) => {
+  const { data } = await apiClient.post('/docs', { slug, title });
+  return data;
+};
+
+export const deleteDoc = async (slug) => {
+  const { data } = await apiClient.delete(`/docs/${slug}`);
+  return data;
+};
+
 export const uploadDocImage = async (dataUrl) => {
   const { data } = await apiClient.post('/docs/upload-image', { dataUrl });
   return data;
