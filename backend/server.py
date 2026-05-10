@@ -247,7 +247,40 @@ async def require_superadmin(current_user: Dict = Depends(get_current_user)) -> 
 # ============================================================
 
 async def seed_defaults():
-    # Config defaults
+    # Ensure unique index on config.key to prevent duplicates
+    await db.config.create_index("key", unique=True, sparse=False)
+
+    # Clean up any duplicate config keys — keep doc with longest non-empty value
+    pipeline = [{"$group": {"_id": "$key", "count": {"$sum": 1}, "ids": {"$push": "$_id"}}}]
+    async for grp in db.config.aggregate(pipeline):
+        if grp["count"] > 1:
+            # Keep the one with a non-empty value, delete the rest
+            docs = await db.config.find({"_id": {"$in": grp["ids"]}}).to_list(20)
+            docs_sorted = sorted(docs, key=lambda d: len(str(d.get("value", "") or "")), reverse=True)
+            ids_to_delete = [d["_id"] for d in docs_sorted[1:]]
+            await db.config.delete_many({"_id": {"$in": ids_to_delete}})
+
+    # Ensure all required keys exist (upsert defaults without overwriting existing values)
+    required_defaults = [
+        ("wahaUrl", ""), ("wahaSession", "default"), ("wahaApiKey", ""),
+        ("backendUrl", ""), ("aiProvider", ""), ("aiModel", ""),
+        ("aiApiKey", ""), ("ollamaUrl", ""), ("systemPrompt", ""),
+        ("businessInfo", ""), ("aiTemperature", 0.7), ("aiMaxTokens", 500),
+        ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
+        ("ruleAiEnabled", False), ("isBotActive", False),
+        ("messageRetentionDays", 90),
+    ]
+    for key, default_val in required_defaults:
+        await db.config.update_one(
+            {"key": key},
+            {"$setOnInsert": {"key": key, "value": default_val}},
+            upsert=True,
+        )
+
+    # Legacy migration: old deployments used hasWahaApiKey/hasAiApiKey, remove them
+    await db.config.delete_many({"key": {"$in": ["hasWahaApiKey", "hasAiApiKey"]}})
+
+    # Config defaults (only if completely empty — legacy path)
     config_count = await db.config.count_documents({"key": {"$nin": ["admin_password_hash"]}})
     if config_count == 0:
         defaults = [
@@ -813,10 +846,14 @@ async def get_dashboard_chart(token: str = Depends(validate_token)):
 
 @api_router.get("/config")
 async def get_config(token: str = Depends(validate_token)):
-    configs = await db.config.find({"key": {"$ne": "admin_password_hash"}}, {"_id": 0}).to_list(100)
+    configs = await db.config.find({"key": {"$ne": "admin_password_hash"}}, {"_id": 0}).to_list(200)
     result = {}
     for c in configs:
-        result[c["key"]] = c.get("value", "")
+        key = c["key"]
+        val = c.get("value", "")
+        # If duplicate keys exist, prefer the non-empty value
+        if key not in result or (not result[key] and val):
+            result[key] = val
     return result
 
 @api_router.put("/config")
