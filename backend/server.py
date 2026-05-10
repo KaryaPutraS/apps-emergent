@@ -328,6 +328,22 @@ async def seed_defaults():
         except Exception:
             pass
 
+        # Step 8: Backfill phone field for contacts that don't have it yet
+        try:
+            import re as _re2
+            async for contact in db.contacts.find({"phone": {"$exists": False}, "chatId": {"$exists": True}}):
+                chat_id = contact.get("chatId", "")
+                if not chat_id or "@g.us" in chat_id:
+                    continue
+                phone_num = _re2.sub(r'@[\w.]+$', '', chat_id)
+                phone_display = ('+' + phone_num) if _re2.match(r'^\d{6,}$', phone_num) else phone_num
+                await db.contacts.update_one(
+                    {"_id": contact["_id"]},
+                    {"$set": {"phone": phone_display}}
+                )
+        except Exception as e:
+            print(f"[seed] WARNING: phone backfill failed: {e}")
+
     except Exception as e:
         print(f"[seed] ERROR in seed_defaults (non-fatal): {e}")
 
