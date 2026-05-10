@@ -9,6 +9,17 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { toast } from 'sonner';
 
+// Strip semua suffix WhatsApp dan kembalikan nomor bersih
+function parseWaNumber(chatId) {
+  if (!chatId) return '-';
+  if (chatId.includes('@g.us')) return 'Grup';
+  // Hapus semua suffix: @c.us, @lid, @s.whatsapp.net, dll
+  const num = chatId.replace(/@[\w.]+$/, '');
+  // Jika terlihat seperti nomor telepon (hanya angka, >6 digit)
+  if (/^\d{6,}$/.test(num)) return '+' + num;
+  return num;
+}
+
 const Contacts = () => {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +75,7 @@ const Contacts = () => {
                   <tr key={c.chatId} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
                     <td className="py-3 px-3 font-medium text-slate-900">{c.name}</td>
                     <td className="py-3 px-3 font-mono text-sm text-slate-600">
-                      {c.chatId ? '+' + c.chatId.replace('@c.us', '').replace('@g.us', '') : '-'}
+                      {c.phone || parseWaNumber(c.chatId)}
                     </td>
                     <td className="py-3 px-3 text-xs text-slate-500 hidden lg:table-cell">{formatWaktu(c.lastSeen, timezone)}</td>
                     <td className="py-3 px-3 hidden md:table-cell"><div className="flex flex-wrap gap-1">{c.tag ? c.tag.split(',').map((t, i) => <Badge key={i} variant="secondary" className="text-[10px]">{t.trim()}</Badge>) : <span className="text-slate-300">-</span>}</div></td>

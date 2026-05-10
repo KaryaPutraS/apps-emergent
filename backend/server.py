@@ -1630,14 +1630,27 @@ async def receive_webhook(token: str, request: Request):
         "tokensUsed": 0,
     })
 
+    # Derive phone number — strip all WA suffixes (@c.us, @lid, @s.whatsapp.net)
+    import re as _re
+    phone_num = _re.sub(r'@[\w.]+$', '', chat_id)
+    phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
+
+    contact_name = (
+        msg_payload.get("notifyName") or
+        msg_payload.get("pushName") or
+        msg_payload.get("_data", {}).get("notifyName") or
+        phone_display
+    )
+
     # Update/create contact
     await db.contacts.update_one(
         {"chatId": chat_id, "userId": uid},
         {"$set": {
             "chatId": chat_id,
             "userId": uid,
+            "phone": phone_display,
             "lastSeen": now_str,
-            "name": msg_payload.get("notifyName") or msg_payload.get("pushName") or chat_id.replace("@c.us", ""),
+            "name": contact_name,
         }, "$setOnInsert": {"isBlocked": False, "tag": "", "createdAt": now_str}},
         upsert=True
     )
