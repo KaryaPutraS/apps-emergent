@@ -1648,31 +1648,42 @@ async def receive_webhook(token: str, request: Request):
 
     # Derive phone number — strip all WA suffixes (@c.us, @lid, @s.whatsapp.net)
     import re as _re
+    from urllib.parse import quote as _url_quote
     phone_num = _re.sub(r'@[\w.]+$', '', chat_id)
     # If LID format (@lid), the number is an internal WhatsApp ID, not a real phone number.
     # Try to resolve via WAHA contacts API.
     if chat_id.endswith("@lid") and waha_url:
         try:
             _waha_headers = {"X-Api-Key": waha_api_key} if waha_api_key else {}
+            _encoded_id = _url_quote(chat_id, safe='')
             async with httpx.AsyncClient(timeout=5) as _wc:
                 _resp = await _wc.get(
-                    f"{waha_url}/api/{waha_session}/contacts/{chat_id}",
+                    f"{waha_url}/api/{waha_session}/contacts/{_encoded_id}",
                     headers=_waha_headers,
                 )
+                await add_log("SYSTEM", f"[lid-resolve] status={_resp.status_code} body={_resp.text[:200]}", uid)
                 if _resp.status_code == 200:
                     _cdata = _resp.json()
-                    # WAHA may return 'number' or 'id' in @c.us format
-                    _resolved = _cdata.get("number") or _cdata.get("phone") or ""
+                    # WAHA may return 'number', 'phone', or 'id' in @c.us format
+                    _resolved = (
+                        _cdata.get("number") or
+                        _cdata.get("phone") or
+                        _cdata.get("phoneNumber") or ""
+                    )
                     if not _resolved:
                         # Try extracting from returned id if it's @c.us format
                         _rid = _cdata.get("id", "")
                         if _rid and "@c.us" in _rid:
                             _resolved = _rid.replace("@c.us", "")
-                    if _resolved and _re.match(r'^\d{6,}$', _resolved.lstrip("+")):
-                        phone_num = _resolved.lstrip("+")
-        except Exception:
-            pass
-    phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
+                    if _resolved and _re.match(r'^\d{6,}$', str(_resolved).lstrip("+")):
+                        phone_num = str(_resolved).lstrip("+")
+        except Exception as _e:
+            await add_log("SYSTEM", f"[lid-resolve] error: {_e}", uid)
+    # If still LID-derived (not resolved), don't store it as a fake phone number
+    if chat_id.endswith("@lid") and phone_num == _re.sub(r'@[\w.]+$', '', chat_id):
+        phone_display = ""
+    else:
+        phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
 
     contact_name = (
         msg_payload.get("notifyName") or
