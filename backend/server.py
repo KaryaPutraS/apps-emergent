@@ -864,25 +864,39 @@ async def get_dashboard_chart(current_user: Dict = Depends(get_current_user)):
 # ============================================================
 
 async def _get_user_config(user_id: str) -> dict:
-    """Load config for a user. User-specific values override global (userId='') defaults."""
+    """Load config for a user.
+    Priority: user-specific non-empty > global non-empty > user-specific empty > global empty.
+    Empty user-specific values do NOT override non-empty global values,
+    preventing blank migration data from wiping out working config.
+    """
     all_docs = await db.config.find(
         {"key": {"$ne": "admin_password_hash"}, "userId": {"$in": [user_id, ""]}},
         {"_id": 0}
     ).to_list(400)
-    result = {}
-    # First pass: global defaults
+
+    global_vals: dict = {}
+    user_vals: dict = {}
+
     for c in all_docs:
-        if c.get("userId", "") == "":
-            key = c["key"]
-            val = c.get("value", "")
-            if key not in result or (not result[key] and val):
-                result[key] = val
-    # Second pass: user-specific overrides
-    for c in all_docs:
-        if c.get("userId", "") == user_id and user_id != "":
-            key = c["key"]
-            val = c.get("value", "")
+        uid = c.get("userId", "")
+        key = c["key"]
+        val = c.get("value", "")
+        if uid == "":
+            # prefer non-empty if duplicate global keys exist
+            if key not in global_vals or (not global_vals[key] and val):
+                global_vals[key] = val
+        elif uid == user_id:
+            if key not in user_vals or (not user_vals[key] and val):
+                user_vals[key] = val
+
+    # Merge: start with global, then override with user-specific non-empty values
+    result = {**global_vals}
+    for key, val in user_vals.items():
+        if val not in ("", None):
             result[key] = val
+        elif key not in result:
+            result[key] = val
+
     return result
 
 @api_router.get("/config")
