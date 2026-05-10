@@ -286,6 +286,33 @@ async def seed_defaults():
     # Legacy migration: old deployments used hasWahaApiKey/hasAiApiKey, remove them
     await db.config.delete_many({"key": {"$in": ["hasWahaApiKey", "hasAiApiKey"]}})
 
+    # Migrate rules/knowledge/templates without userId → assign to first regular user
+    first_user = await db.users.find_one({"role": {"$ne": "superadmin"}})
+    if first_user:
+        first_uid = str(first_user["id"])
+        await db.rules.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
+        await db.knowledge.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
+        await db.templates.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
+        await db.contacts.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
+        await db.messages.update_many({"userId": {"$exists": False}}, {"$set": {"userId": first_uid}})
+        # Also copy global config (userId="") to user-specific if user has no config yet
+        user_config_count = await db.config.count_documents({"userId": first_uid})
+        if user_config_count == 0:
+            global_docs = await db.config.find({"userId": ""}).to_list(200)
+            for doc in global_docs:
+                try:
+                    await db.config.insert_one({
+                        "key": doc["key"],
+                        "userId": first_uid,
+                        "value": doc.get("value", ""),
+                        "updated_at": datetime.utcnow(),
+                    })
+                except Exception:
+                    pass  # already exists
+
+    # Create unique index on processed_msgs for atomic deduplication
+    await db.processed_msgs.create_index("msgId", unique=True, sparse=True)
+
 
     # Seed default superadmin user in users collection
     if await db.users.count_documents({}) == 0:
@@ -1489,30 +1516,37 @@ async def receive_webhook(token: str, request: Request):
     event = payload.get("event", "")
     msg_payload = payload.get("payload", {})
 
-    # Skip non-message events silently (no log spam)
-    if event not in ("message", "message.any"):
+    # Only process incoming message events — message.any also fires for bot's own replies
+    if event != "message":
         return {"success": True, "processed": False, "reason": "event_ignored"}
 
-    from_me = msg_payload.get("fromMe", False)
-    chat_id = msg_payload.get("from") or msg_payload.get("chatId", "")
-    body = (msg_payload.get("body") or msg_payload.get("text") or "").strip()
-    msg_type = msg_payload.get("type", "chat")
-    msg_id = msg_payload.get("id", "")
-
-    # Skip outgoing messages to prevent loop (bot replies trigger message.any)
+    # fromMe detection: WAHA v1 has payload.fromMe, WAHA v2 has payload.key.fromMe
+    from_me = (
+        msg_payload.get("fromMe", False)
+        or msg_payload.get("key", {}).get("fromMe", False)
+        or msg_payload.get("_data", {}).get("id", {}).get("fromMe", False)
+    )
     if from_me:
         return {"success": True, "processed": False, "reason": "from_me"}
 
-    # Deduplicate: skip if this message ID was already processed recently
+    chat_id = msg_payload.get("from") or msg_payload.get("chatId", "")
+    body = (msg_payload.get("body") or msg_payload.get("text") or "").strip()
+    msg_type = msg_payload.get("type", "chat")
+
+    # Normalize msg_id to string for reliable deduplication
+    raw_id = msg_payload.get("id", "")
+    if isinstance(raw_id, dict):
+        msg_id = raw_id.get("_serialized") or raw_id.get("id") or str(raw_id)
+    else:
+        msg_id = str(raw_id) if raw_id else ""
+
+    # Atomic deduplication using unique index — prevents race condition on concurrent webhooks
     if msg_id:
-        already = await db.processed_msgs.find_one({"msgId": msg_id})
-        if already:
+        try:
+            await db.processed_msgs.insert_one({"msgId": msg_id, "ts": datetime.utcnow()})
+        except Exception:
+            # DuplicateKeyError = already processed
             return {"success": True, "processed": False, "reason": "duplicate"}
-        await db.processed_msgs.insert_one({"msgId": msg_id, "ts": datetime.utcnow()})
-        # TTL cleanup: remove entries older than 24h
-        await db.processed_msgs.delete_many(
-            {"ts": {"$lt": datetime.utcnow() - timedelta(hours=24)}}
-        )
 
     await add_log("WEBHOOK_IN", f"[{user['username']}] event={event} type={msg_type} fromMe={from_me} from={chat_id}")
 
@@ -1631,10 +1665,14 @@ async def receive_webhook(token: str, request: Request):
         max_tokens = int(cfg.get("aiMaxTokens") or 500)
         memory_limit = int(cfg.get("memoryLimit") or 10)
 
+        await add_log("AI_CALL", f"[{user['username']}] Config — provider={provider} model={model} apiKey={'set' if ai_api_key else 'KOSONG'}", uid)
+
         if not provider:
-            await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Set di menu Koneksi → AI Provider.", uid)
+            await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Buka menu Koneksi → AI Provider → Simpan.", uid)
+            reply_text = "Maaf, bot belum dikonfigurasi dengan benar (provider kosong)."
         elif not ai_api_key and provider != "OLLAMA":
-            await add_log("AI_ERROR", f"[{user['username']}] AI API Key belum diisi untuk provider {provider}. Set di menu Koneksi → AI Provider.", uid)
+            await add_log("AI_ERROR", f"[{user['username']}] AI API Key kosong untuk provider {provider}. Buka menu Koneksi → simpan ulang.", uid)
+            reply_text = "Maaf, bot belum dikonfigurasi dengan benar (API key kosong)."
 
         if business_info:
             system_prompt += f"\n\nInformasi bisnis:\n{business_info}"
@@ -1653,8 +1691,9 @@ async def receive_webhook(token: str, request: Request):
             messages.append({"role": role, "content": h["message"]})
         messages.append({"role": "user", "content": body})
 
-        await add_log("AI_CALL", f"[{user['username']}] Memanggil AI {provider}/{model} untuk {chat_id}", uid)
-        reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
+        if not reply_text:
+            await add_log("AI_CALL", f"[{user['username']}] Memanggil AI {provider}/{model} untuk {chat_id}", uid)
+            reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
         response_type = "ai"
 
     if not reply_text:
