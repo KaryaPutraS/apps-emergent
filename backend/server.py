@@ -2368,7 +2368,8 @@ async def _call_openai_compat(base_url: str, model: str, api_key: str, system_pr
 
 async def _call_gemini(model: str, api_key: str, system_prompt: str,
                        messages: list, temperature: float, max_tokens: int) -> tuple:
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    # Pass API key as URL query param — most reliable across all Google API versions
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
     # Build contents, converting role names (assistant→model for Gemini)
     contents = []
@@ -2379,11 +2380,10 @@ async def _call_gemini(model: str, api_key: str, system_prompt: str,
             contents.append({"role": role, "parts": [{"text": text_content}]})
 
     # Gemini REQUIRES conversation to start with role "user".
-    # Drop any leading "model" messages (can happen if oldest history entry is a bot reply).
     while contents and contents[0]["role"] != "user":
         contents.pop(0)
 
-    # Merge any consecutive same-role messages that slipped through
+    # Merge consecutive same-role messages
     merged_contents = []
     for c in contents:
         if merged_contents and merged_contents[-1]["role"] == c["role"]:
@@ -2393,53 +2393,56 @@ async def _call_gemini(model: str, api_key: str, system_prompt: str,
     contents = merged_contents
 
     if not contents:
-        await add_log("AI_ERROR", "Gemini: contents kosong setelah normalisasi — tidak ada riwayat valid")
+        await add_log("AI_ERROR", "Gemini: contents kosong setelah normalisasi")
         return ("", 0)
 
-    # Ensure last message is user (required by Gemini)
     if contents[-1]["role"] != "user":
-        await add_log("AI_ERROR", f"Gemini: pesan terakhir bukan user (role={contents[-1]['role']}) — abaikan")
+        await add_log("AI_ERROR", f"Gemini: pesan terakhir bukan user (role={contents[-1]['role']})")
         return ("", 0)
 
-    # Ensure maxOutputTokens is valid
     safe_max_tokens = max(50, int(max_tokens or 500))
 
     body = {
         "systemInstruction": {"parts": [{"text": system_prompt or "Kamu adalah asisten yang membantu."}]},
         "contents": contents,
-        "generationConfig": {"temperature": temperature, "maxOutputTokens": safe_max_tokens},
+        "generationConfig": {
+            "temperature": float(temperature),
+            "maxOutputTokens": safe_max_tokens,
+        },
     }
-    headers = {"x-goog-api-key": api_key}
 
-    await add_log("AI_CALL", f"Gemini DEBUG → model={model} maxTokens={safe_max_tokens} contents={len(contents)} turns lastRole={contents[-1]['role']}")
+    await add_log("AI_CALL", f"Gemini → model={model} tokens={safe_max_tokens} turns={len(contents)}")
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(url, json=body, headers=headers)
+    async with httpx.AsyncClient(timeout=45) as client:
+        r = await client.post(url, json=body, headers={"Content-Type": "application/json"})
         if r.status_code != 200:
-            await add_log("AI_ERROR", f"Gemini HTTP {r.status_code}: {r.text[:400]}")
+            await add_log("AI_ERROR", f"Gemini HTTP {r.status_code}: {r.text[:500]}")
             r.raise_for_status()
+
         data = r.json()
         candidates = data.get("candidates", [])
         if not candidates:
             block_reason = data.get("promptFeedback", {}).get("blockReason", "")
-            await add_log("AI_ERROR", f"Gemini: tidak ada candidates. blockReason={block_reason or 'unknown'}. Keys={list(data.keys())}")
+            await add_log("AI_ERROR", f"Gemini: 0 candidates. blockReason={block_reason or 'none'}. keys={list(data.keys())}")
             return ("", 0)
+
         candidate = candidates[0]
-        finish_reason = candidate.get("finishReason", "UNKNOWN")
+        # Accept both camelCase and upper-case variants across Gemini API versions
+        finish_reason = (candidate.get("finishReason") or candidate.get("finish_reason") or "UNKNOWN").upper()
         if finish_reason not in ("STOP", "MAX_TOKENS"):
-            await add_log("AI_ERROR", f"Gemini: finishReason={finish_reason}. Safety/quota/format issue?")
-            if finish_reason == "SAFETY":
-                await add_log("AI_ERROR", f"Gemini safety ratings: {candidate.get('safetyRatings', [])}")
+            await add_log("AI_ERROR", f"Gemini: finishReason={finish_reason} safety={candidate.get('safetyRatings', [])}")
             return ("", 0)
+
         parts = candidate.get("content", {}).get("parts", [])
         if not parts:
-            await add_log("AI_ERROR", f"Gemini: parts kosong. finishReason={finish_reason}")
+            await add_log("AI_ERROR", f"Gemini: parts kosong (finishReason={finish_reason})")
             return ("", 0)
-        text = parts[0].get("text", "").strip()
+
+        text = "".join(p.get("text", "") for p in parts).strip()
         if not text:
-            raw = parts[0].get("text", "")
-            await add_log("AI_ERROR", f"Gemini: text kosong setelah strip. raw='{repr(raw[:50])}' finishReason={finish_reason}")
+            await add_log("AI_ERROR", f"Gemini: teks kosong setelah join parts (finishReason={finish_reason})")
             return ("", 0)
+
         tokens = data.get("usageMetadata", {}).get("totalTokenCount", 0)
         return (text, tokens)
 
