@@ -312,6 +312,11 @@ export const testFullFlow = async (message) => {
   return data;
 };
 
+export const testAI = async (message) => {
+  const { data } = await apiClient.post('/test/ai', { message });
+  return data;
+};
+
 // ============================================================
 // DOCUMENTATION
 // ============================================================

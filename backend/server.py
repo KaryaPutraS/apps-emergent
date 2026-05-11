@@ -1553,6 +1553,45 @@ async def test_full_flow(req: TestRequest, current_user: Dict = Depends(get_curr
 
     return {"type": "Full Flow", "status": "success", "detail": "Flow: No rule/knowledge match → AI full response → Bot akan merespon dengan AI berdasarkan system prompt."}
 
+@api_router.post("/test/ai")
+async def test_ai(req: TestRequest, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong")
+
+    cfg = await _get_user_config(uid)
+    provider = cfg.get("aiProvider", "").upper()
+    model = cfg.get("aiModel", "")
+    api_key = cfg.get("aiApiKey", "")
+    ollama_url = cfg.get("ollamaUrl", "")
+    system_prompt = cfg.get("systemPrompt", "") or "Kamu adalah asisten virtual yang membantu dan ramah."
+    temperature = float(cfg.get("aiTemperature") or 0.7)
+    max_tokens = int(cfg.get("aiMaxTokens") or 500)
+
+    if not provider:
+        return {"type": "Test AI", "status": "error", "detail": "Provider AI belum dikonfigurasi. Atur di halaman Koneksi."}
+    if not api_key and provider not in ("OLLAMA",):
+        return {"type": "Test AI", "status": "error", "detail": f"API key {provider} belum diisi. Atur di halaman Koneksi."}
+
+    import time as _time
+    t0 = _time.time()
+    reply, tokens = await call_ai(
+        provider, model, api_key, system_prompt,
+        [{"role": "user", "content": req.message}],
+        temperature, max_tokens, ollama_url
+    )
+    elapsed = round(_time.time() - t0, 2)
+
+    if not reply:
+        return {"type": "Test AI", "status": "error", "detail": f"AI ({provider}/{model}) tidak mengembalikan respons. Cek API key dan model di halaman Koneksi, lalu lihat Logs untuk detail error."}
+
+    return {
+        "type": "Test AI",
+        "status": "success",
+        "detail": reply,
+        "meta": f"Provider: {provider} | Model: {model} | Tokens: {tokens} | Waktu: {elapsed}s",
+    }
+
 # ============================================================
 # RESET
 # ============================================================
