@@ -2155,12 +2155,16 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
     _contact_set = {"chatId": chat_id, "userId": uid, "lastSeen": now_str, "name": contact_name}
     if phone_display:
         _contact_set["phone"] = phone_display
+    # $setOnInsert must NOT include 'phone' when $set already has it (MongoDB conflict)
+    _set_on_insert = {"isBlocked": False, "tag": "", "note": "", "createdAt": now_str}
+    if not phone_display:
+        _set_on_insert["phone"] = ""
     await db.contacts.update_one(
         {"chatId": chat_id, "userId": uid},
         {
             "$set": _contact_set,
             "$inc": {"messageCount": 1},
-            "$setOnInsert": {"isBlocked": False, "tag": "", "note": "", "phone": phone_display or "", "createdAt": now_str},
+            "$setOnInsert": _set_on_insert,
         },
         upsert=True
     )
