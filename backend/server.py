@@ -1982,7 +1982,9 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         if matched:
             rule_text = rule.get("response", "")
             rule_matched_name = rule.get("name", "?")
-            rule_mode = rule.get("responseMode", default_mode)
+            # Only use rule's responseMode if it's a valid known value; otherwise fall back to global default
+            _rm = rule.get("responseMode", "")
+            rule_mode = _rm if _rm in ("direct", "ai_polish", "ai_context") else default_mode
             # Feature 7: increment hit counter
             await db.rules.update_one({"id": rule.get("id"), "userId": uid}, {"$inc": {"hitCount": 1}})
             # Feature 4: resolve template variables in rule response
@@ -2273,9 +2275,25 @@ async def _call_gemini(model: str, api_key: str, system_prompt: str,
     headers = {"x-goog-api-key": api_key}
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(url, json=body, headers=headers)
-        r.raise_for_status()
+        if r.status_code != 200:
+            await add_log("AI_ERROR", f"Gemini HTTP {r.status_code}: {r.text[:300]}")
+            r.raise_for_status()
         data = r.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            block_reason = data.get("promptFeedback", {}).get("blockReason", "")
+            await add_log("AI_ERROR", f"Gemini: tidak ada candidates. blockReason={block_reason or 'unknown'}. Keys={list(data.keys())}")
+            return ("", 0)
+        candidate = candidates[0]
+        finish_reason = candidate.get("finishReason", "UNKNOWN")
+        if finish_reason not in ("STOP", "MAX_TOKENS"):
+            await add_log("AI_ERROR", f"Gemini: finishReason={finish_reason} (bukan STOP). Safety/quota issue?")
+            return ("", 0)
+        parts = candidate.get("content", {}).get("parts", [])
+        if not parts:
+            await add_log("AI_ERROR", f"Gemini: parts kosong. finishReason={finish_reason}")
+            return ("", 0)
+        text = parts[0].get("text", "").strip()
         tokens = data.get("usageMetadata", {}).get("totalTokenCount", 0)
         return (text, tokens)
 
