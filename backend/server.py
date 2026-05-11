@@ -1978,32 +1978,110 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         "tokensUsed": 0,
     })
 
-    # Derive phone number — strip all WA suffixes (@c.us, @lid, @s.whatsapp.net)
+    # ── Comprehensive phone/chatId extraction (GAS-inspired multi-field scoring) ──
     import re as _re
     from urllib.parse import quote as _url_quote
-    phone_num = _re.sub(r'@[\w.]+$', '', chat_id)
 
-    # ── @lid resolution: try multiple strategies ─────────────────────────────
-    if chat_id.endswith("@lid"):
+    def _is_lid(val: str) -> bool:
+        return bool(val) and (val.endswith("@lid") or (val.isdigit() and len(val) > 15))
+
+    def _looks_like_indonesian_phone(digits: str) -> bool:
+        d = _re.sub(r'\D', '', digits)
+        if d.startswith('62'):
+            return 10 <= len(d) <= 15
+        if d.startswith('08'):
+            return 10 <= len(d) <= 14
+        if d.startswith('8'):
+            return 9 <= len(d) <= 13
+        return False
+
+    def _digits_to_indonesia(digits: str) -> str:
+        d = _re.sub(r'\D', '', digits)
+        if d.startswith('0'):
+            return '62' + d[1:]
+        if d.startswith('8'):
+            return '62' + d
+        return d
+
+    def _score_candidate(cand: str) -> int:
+        """Higher score = better candidate for phone/chatId."""
+        if not cand:
+            return -1
+        score = 0
+        if "@c.us" in cand:
+            score += 10
+        if "@lid" in cand:
+            score -= 5
+        digits = _re.sub(r'@[\w.]+$', '', cand)
+        if _looks_like_indonesian_phone(digits):
+            score += 8
+        elif _re.match(r'^\d{6,}$', digits):
+            score += 4
+        return score
+
+    def _extract_all_candidates(obj, _depth=0) -> list:
+        """Deep-scan any dict/list for @c.us or phone-like values."""
+        candidates = []
+        if _depth > 5:
+            return candidates
+        if isinstance(obj, dict):
+            for v in obj.values():
+                candidates.extend(_extract_all_candidates(v, _depth + 1))
+        elif isinstance(obj, list):
+            for item in obj:
+                candidates.extend(_extract_all_candidates(item, _depth + 1))
+        elif isinstance(obj, str):
+            if "@c.us" in obj:
+                candidates.append(obj)
+            elif _re.match(r'^\+?62\d{7,13}$', obj):
+                candidates.append(obj)
+        return candidates
+
+    # Collect candidates from known fields first
+    _top_fields = [
+        msg_payload.get("from", ""),
+        msg_payload.get("author", ""),
+        msg_payload.get("participant", ""),
+        msg_payload.get("chatId", ""),
+        (msg_payload.get("sender") or {}).get("id", ""),
+        (msg_payload.get("sender") or {}).get("_serialized", ""),
+        (msg_payload.get("sender") or {}).get("phone", ""),
+        msg_payload.get("_data", {}).get("from", ""),
+        msg_payload.get("_data", {}).get("author", ""),
+        (msg_payload.get("_data", {}).get("id") or {}).get("remote", ""),
+        (msg_payload.get("_data", {}).get("sender") or {}).get("id", ""),
+        (msg_payload.get("key") or {}).get("remoteJid", ""),
+        (msg_payload.get("chat") or {}).get("id", ""),
+        (msg_payload.get("chat") or {}).get("id", {}).get("_serialized", "") if isinstance((msg_payload.get("chat") or {}).get("id"), dict) else "",
+    ]
+    # Deep scan for any other @c.us strings
+    _deep_candidates = _extract_all_candidates(msg_payload)
+
+    _all_candidates = [c for c in _top_fields + _deep_candidates if c and isinstance(c, str)]
+
+    # Pick best @c.us candidate by score
+    _best_cus = max(
+        (c for c in _all_candidates if "@c.us" in c and not "@g.us" in c),
+        key=_score_candidate,
+        default="",
+    )
+
+    # If we found a better @c.us candidate than the current chat_id (which may be @lid), use it
+    if _best_cus and not _is_lid(_best_cus):
+        _resolved_chat_id = _best_cus
+    else:
+        _resolved_chat_id = chat_id
+
+    # Extract raw digit string from the best resolved id
+    phone_num = _re.sub(r'@[\w.]+$', '', _resolved_chat_id).lstrip("+")
+
+    # ── If still @lid, try WAHA API resolution ───────────────────────────────
+    if _is_lid(chat_id) and not _best_cus:
         _waha_headers = {"X-Api-Key": waha_api_key} if waha_api_key else {}
         _resolved_phone = ""
 
-        # Strategy A: check webhook payload fields first (no extra HTTP call)
-        for _field in ("from", "author", "participant"):
-            _val = msg_payload.get(_field, "")
-            if _val and "@c.us" in str(_val):
-                _resolved_phone = str(_val).replace("@c.us", "").lstrip("+")
-                break
-        # Also check nested sender object
-        if not _resolved_phone:
-            _sender = msg_payload.get("sender") or {}
-            if isinstance(_sender, dict):
-                _sid = _sender.get("id", "") or _sender.get("phone", "")
-                if _sid and "@c.us" in str(_sid):
-                    _resolved_phone = str(_sid).replace("@c.us", "").lstrip("+")
-
         # Strategy B: WAHA contacts endpoint
-        if not _resolved_phone and waha_url:
+        if waha_url:
             try:
                 _encoded_id = _url_quote(chat_id, safe='')
                 async with httpx.AsyncClient(timeout=6) as _wc:
@@ -2023,11 +2101,11 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                                 _raw = _rid.replace("@c.us", "").lstrip("+")
                         if _raw and _re.match(r'^\d{6,}$', str(_raw).lstrip("+")):
                             _resolved_phone = str(_raw).lstrip("+")
-                    await add_log("SYSTEM", f"[lid-A] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
+                    await add_log("SYSTEM", f"[lid-B] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
             except Exception as _e:
-                await add_log("SYSTEM", f"[lid-A] error: {_e}", uid)
+                await add_log("SYSTEM", f"[lid-B] error: {_e}", uid)
 
-        # Strategy C: WAHA chats endpoint (often maps lid→c.us)
+        # Strategy C: WAHA chats endpoint
         if not _resolved_phone and waha_url:
             try:
                 _encoded_id = _url_quote(chat_id, safe='')
@@ -2038,7 +2116,6 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                     )
                     if _resp.status_code == 200:
                         _cd = _resp.json()
-                        # chats may return id/contact.id in @c.us format
                         _cid = _cd.get("id", "") or (_cd.get("contact") or {}).get("id", "")
                         if _cid and "@c.us" in str(_cid):
                             _resolved_phone = str(_cid).replace("@c.us", "").lstrip("+")
@@ -2049,8 +2126,13 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         if _resolved_phone and _re.match(r'^\d{6,}$', _resolved_phone):
             phone_num = _resolved_phone
 
-    # If still LID-derived (not resolved), don't store it as a fake phone number
-    if chat_id.endswith("@lid") and phone_num == _re.sub(r'@[\w.]+$', '', chat_id):
+    # Normalize to Indonesian format if valid Indonesian number
+    if _looks_like_indonesian_phone(phone_num):
+        phone_num = _digits_to_indonesia(phone_num)
+
+    # Build display phone — blank if still a LID-derived non-numeric value
+    _is_unresolved_lid = _is_lid(chat_id) and not _best_cus and not _looks_like_indonesian_phone(phone_num) and not _re.match(r'^\d{6,}$', phone_num)
+    if _is_unresolved_lid:
         phone_display = ""
     else:
         phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
@@ -2062,8 +2144,10 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         msg_payload.get("notifyname") or
         (msg_payload.get("sender") or {}).get("name") or
         (msg_payload.get("sender") or {}).get("pushName") or
+        (msg_payload.get("sender") or {}).get("verifiedName") or
         msg_payload.get("_data", {}).get("notifyName") or
         msg_payload.get("_data", {}).get("pushName") or
+        (msg_payload.get("_data", {}).get("sender") or {}).get("name") or
         phone_display
     )
 
