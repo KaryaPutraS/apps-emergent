@@ -4,7 +4,7 @@ import { useApp } from '../App';
 import {
   MessageSquare, Users, GitBranch, Brain, Zap, Clock, TrendingUp, Activity,
   Sparkles, Plus, BookOpen, Radio, RefreshCw, Play, Database,
-  UserCheck, UserCog, Crown, Briefcase, Eye as EyeIcon
+  UserCheck, UserCog, Crown, Briefcase, Eye as EyeIcon, Trophy, ArrowDownLeft, ArrowUpRight
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
@@ -121,6 +121,14 @@ const Dashboard = () => {
         <StatCard icon={Brain} label="AI Calls" value={stats.aiCalls || 0} trend={`${(stats.tokensUsed || 0).toLocaleString()} tokens`} color="orange" />
       </div>
 
+      {/* Response breakdown */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={ArrowDownLeft} label="Pesan Masuk" value={(stats.incomingCount || 0).toLocaleString()} color="teal" />
+        <StatCard icon={ArrowUpRight} label="Pesan Keluar" value={(stats.outgoingCount || 0).toLocaleString()} color="blue" />
+        <StatCard icon={GitBranch} label="Jawab via Rule" value={(stats.ruleCalls || 0).toLocaleString()} color="purple" />
+        <StatCard icon={Sparkles} label="Jawab AI+Rule" value={(stats.comboCalls || 0).toLocaleString()} trend={`${stats.aiCalls || 0} murni AI`} color="rose" />
+      </div>
+
       {/* User stats — hanya tampil untuk admin */}
       {isSuperAdmin && (
         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl p-5 text-white">
@@ -206,6 +214,35 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Top Rules */}
+      {stats.topRules && stats.topRules.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6">
+          <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
+            <Trophy className="w-4 h-4 text-amber-500" /> Top 5 Rules Terpopuler
+          </h3>
+          <div className="space-y-3">
+            {stats.topRules.map((r, i) => {
+              const max = stats.topRules[0]?.hitCount || 1;
+              const pct = Math.round(((r.hitCount || 0) / max) * 100);
+              return (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-slate-400 w-4">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-700 truncate">{r.name || r.keyword || '—'}</span>
+                      <span className="text-xs text-slate-500 ml-2 shrink-0">{(r.hitCount || 0).toLocaleString()}×</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-400 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getMessages } from '../api/apiClient';
+import { getMessages, exportMessages } from '../api/apiClient';
 import { formatWaktu } from '../utils/time';
-import { RefreshCw, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { RefreshCw, ArrowDownLeft, ArrowUpRight, Download } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
@@ -22,7 +22,15 @@ const Messages = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold text-slate-900">Riwayat Pesan</h1><p className="text-slate-500 text-sm mt-0.5">Log percakapan masuk dan keluar</p></div>
-        <Button variant="outline" size="sm" onClick={() => { fetchData(); toast.success('Data diperbarui!'); }} className="gap-2"><RefreshCw className="w-4 h-4" /> Refresh</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => { fetchData(); toast.success('Data diperbarui!'); }} className="gap-2"><RefreshCw className="w-4 h-4" /> Refresh</Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={async () => { try { await exportMessages('csv'); toast.success('Ekspor CSV berhasil!'); } catch { toast.error('Gagal ekspor'); } }}>
+            <Download className="w-3.5 h-3.5" /> CSV
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={async () => { try { await exportMessages('json'); toast.success('Ekspor JSON berhasil!'); } catch { toast.error('Gagal ekspor'); } }}>
+            <Download className="w-3.5 h-3.5" /> JSON
+          </Button>
+        </div>
       </div>
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         {loading ? <div className="flex justify-center py-10"><div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" /></div> : (

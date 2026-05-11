@@ -1,11 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { getConfig, updateConfig, changePassword } from '../api/apiClient';
-import { Save, Bot, Clock, Zap, Shield, KeyRound, Trash2, Database, Globe, Copy, RefreshCw, LogOut, Eye, EyeOff } from 'lucide-react';
+import { Save, Bot, Clock, Zap, Shield, KeyRound, Trash2, Database, Globe, Copy, RefreshCw, LogOut, Eye, EyeOff, BellRing, Tag, Plus, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import { Switch } from '../components/ui/switch';
+import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
+
+const DAYS = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+
+function parseSchedule(raw) {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (Array.isArray(parsed) && parsed.length === 7) return parsed;
+  } catch {}
+  return DAYS.map((name, day) => ({ day, name, enabled: true, start: '08:00', end: '21:00' }));
+}
+
+function parseAutoLabels(raw) {
+  try {
+    const parsed = JSON.parse(raw || '[]');
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  return [];
+}
 
 const responseModes = [
   { value: 'direct', label: 'Langsung kirim teks rule' },
@@ -15,6 +34,9 @@ const responseModes = [
 
 const SettingsPage = () => {
   const [config, setConfig] = useState({});
+  const [schedule, setSchedule] = useState(parseSchedule(''));
+  const [autoLabels, setAutoLabels] = useState([]);
+  const [newLabel, setNewLabel] = useState({ keyword: '', tag: '' });
   const [loading, setLoading] = useState(true);
   const [showOldPass, setShowOldPass] = useState(false);
   const [showNewPass, setShowNewPass] = useState(false);
@@ -25,6 +47,8 @@ const SettingsPage = () => {
   useEffect(() => {
     getConfig().then(data => {
       setConfig(data);
+      setSchedule(parseSchedule(data.workingHoursSchedule));
+      setAutoLabels(parseAutoLabels(data.autoLabels));
       if (data.timezone) localStorage.setItem('userTimezone', data.timezone);
       setLoading(false);
     }).catch(() => setLoading(false));
@@ -32,11 +56,28 @@ const SettingsPage = () => {
 
   const handleSaveAll = async () => {
     try {
-      await updateConfig(config);
+      const updates = {
+        ...config,
+        workingHoursSchedule: JSON.stringify(schedule),
+        autoLabels: JSON.stringify(autoLabels),
+      };
+      await updateConfig(updates);
       if (config.timezone) localStorage.setItem('userTimezone', config.timezone);
       toast.success('Semua pengaturan tersimpan!');
     } catch (e) { toast.error('Gagal menyimpan pengaturan'); }
   };
+
+  const updateScheduleDay = (idx, field, value) => {
+    setSchedule(prev => prev.map((d, i) => i === idx ? { ...d, [field]: value } : d));
+  };
+
+  const addAutoLabel = () => {
+    if (!newLabel.keyword.trim() || !newLabel.tag.trim()) { toast.error('Keyword dan tag harus diisi'); return; }
+    setAutoLabels(prev => [...prev, { keyword: newLabel.keyword.trim().toLowerCase(), tag: newLabel.tag.trim() }]);
+    setNewLabel({ keyword: '', tag: '' });
+  };
+
+  const removeAutoLabel = (idx) => setAutoLabels(prev => prev.filter((_, i) => i !== idx));
 
   const handleChangePassword = async () => {
     if (!oldPassword || !newPassword) { toast.error('Isi semua field password!'); return; }
@@ -80,11 +121,81 @@ const SettingsPage = () => {
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><Clock className="w-4 h-4 text-emerald-500" /> Jam Operasional</h3>
         <div className="flex items-center gap-3 mb-4"><Switch checked={val('workingHoursEnabled', false)} onCheckedChange={(v) => set('workingHoursEnabled', v)} /><span className="text-sm text-slate-700">Aktifkan Jam Operasional</span></div>
+
+        {val('workingHoursEnabled', false) && (
+          <div className="mb-4">
+            <p className="text-sm font-medium text-slate-700 mb-2">Jadwal Per Hari</p>
+            <div className="space-y-2">
+              {schedule.map((d, i) => (
+                <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-slate-50 border border-slate-100">
+                  <Switch checked={d.enabled} onCheckedChange={(v) => updateScheduleDay(i, 'enabled', v)} />
+                  <span className={`text-sm w-16 font-medium ${d.enabled ? 'text-slate-700' : 'text-slate-400'}`}>{d.name}</span>
+                  {d.enabled ? (
+                    <>
+                      <Input type="time" value={d.start} onChange={(e) => updateScheduleDay(i, 'start', e.target.value)} className="h-8 w-28 text-xs" />
+                      <span className="text-slate-400 text-xs">–</span>
+                      <Input type="time" value={d.end} onChange={(e) => updateScheduleDay(i, 'end', e.target.value)} className="h-8 w-28 text-xs" />
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">Libur / Tutup</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div><label className="text-sm font-medium text-slate-700 block mb-1.5">Jam Buka</label><Input type="time" value={val('workingHoursStart', '08:00')} onChange={(e) => set('workingHoursStart', e.target.value)} /></div>
-          <div><label className="text-sm font-medium text-slate-700 block mb-1.5">Jam Tutup</label><Input type="time" value={val('workingHoursEnd', '21:00')} onChange={(e) => set('workingHoursEnd', e.target.value)} /></div>
+          <div><label className="text-sm font-medium text-slate-700 block mb-1.5">Jam Buka (default)</label><Input type="time" value={val('workingHoursStart', '08:00')} onChange={(e) => set('workingHoursStart', e.target.value)} /></div>
+          <div><label className="text-sm font-medium text-slate-700 block mb-1.5">Jam Tutup (default)</label><Input type="time" value={val('workingHoursEnd', '21:00')} onChange={(e) => set('workingHoursEnd', e.target.value)} /></div>
         </div>
         <div className="mt-4"><label className="text-sm font-medium text-slate-700 block mb-1.5">Pesan di Luar Jam</label><Textarea value={val('offlineMessage', '')} onChange={(e) => set('offlineMessage', e.target.value)} rows={3} /></div>
+      </div>
+
+      {/* Telegram Notifications */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><BellRing className="w-4 h-4 text-emerald-500" /> Notifikasi Telegram</h3>
+        <p className="text-sm text-slate-500 mb-4">Kirim alert ke Telegram ketika ada pesan yang tidak terjawab oleh bot.</p>
+        <div className="flex items-center gap-3 mb-4">
+          <Switch checked={val('telegramNotifyEnabled', false)} onCheckedChange={(v) => set('telegramNotifyEnabled', v)} />
+          <span className="text-sm text-slate-700">Aktifkan Notifikasi Telegram</span>
+        </div>
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${!val('telegramNotifyEnabled', false) ? 'opacity-50 pointer-events-none' : ''}`}>
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">Bot Token</label>
+            <Input value={val('telegramBotToken', '')} onChange={(e) => set('telegramBotToken', e.target.value)} placeholder="1234567890:AAF..." />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">Chat ID</label>
+            <Input value={val('telegramChatId', '')} onChange={(e) => set('telegramChatId', e.target.value)} placeholder="-100123456789" />
+          </div>
+        </div>
+        <p className="text-xs text-slate-400 mt-3">Buat bot via <span className="font-mono">@BotFather</span>, lalu dapatkan Chat ID via <span className="font-mono">@userinfobot</span> atau API getUpdates.</p>
+      </div>
+
+      {/* Auto-Labels */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-2"><Tag className="w-4 h-4 text-emerald-500" /> Label Otomatis Kontak</h3>
+        <p className="text-sm text-slate-500 mb-4">Jika pesan masuk mengandung keyword tertentu, kontak otomatis diberi tag.</p>
+        <div className="space-y-2 mb-4">
+          {autoLabels.length === 0 && <p className="text-sm text-slate-400 italic">Belum ada aturan label otomatis.</p>}
+          {autoLabels.map((lbl, i) => (
+            <div key={i} className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-100 rounded-lg">
+              <span className="text-xs text-slate-500 w-20">Jika ada:</span>
+              <Badge variant="secondary" className="font-mono text-xs">{lbl.keyword}</Badge>
+              <span className="text-xs text-slate-500">→ beri tag:</span>
+              <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs">{lbl.tag}</Badge>
+              <button onClick={() => removeAutoLabel(i)} className="ml-auto text-slate-400 hover:text-red-500 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 items-end">
+          <div className="flex-1"><label className="text-xs font-medium text-slate-600 block mb-1">Keyword</label><Input value={newLabel.keyword} onChange={(e) => setNewLabel(p => ({...p, keyword: e.target.value}))} placeholder="harga, order, beli..." className="h-9 text-sm" /></div>
+          <div className="flex-1"><label className="text-xs font-medium text-slate-600 block mb-1">Tag yang diberikan</label><Input value={newLabel.tag} onChange={(e) => setNewLabel(p => ({...p, tag: e.target.value}))} placeholder="calon-pembeli, vip..." className="h-9 text-sm" /></div>
+          <Button onClick={addAutoLabel} size="sm" className="bg-emerald-600 hover:bg-emerald-700 gap-1.5 h-9"><Plus className="w-3.5 h-3.5" /> Tambah</Button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-6">

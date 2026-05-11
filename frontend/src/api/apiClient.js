@@ -427,4 +427,33 @@ export const aiSetupChat = async (message, history = []) => {
   return data;
 };
 
+// ============================================================
+// EXPORT
+// ============================================================
+
+const _downloadFile = async (url, filename) => {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!response.ok) throw new Error('Export gagal');
+  const blob = await response.blob();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+};
+
+export const exportContacts = (fmt = 'csv') =>
+  _downloadFile(`${API_BASE}/export/contacts?fmt=${fmt}`, `contacts.${fmt}`);
+
+export const exportMessages = (fmt = 'csv') =>
+  _downloadFile(`${API_BASE}/export/messages?fmt=${fmt}`, `messages.${fmt}`);
+
+export const exportRules = () =>
+  _downloadFile(`${API_BASE}/export/rules?fmt=json`, 'rules.json');
+
+export const exportKnowledge = () =>
+  _downloadFile(`${API_BASE}/export/knowledge?fmt=json`, 'knowledge.json');
+
 export default apiClient;

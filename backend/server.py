@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,6 +7,10 @@ import os
 import logging
 import re
 import time
+import json
+import csv
+import io
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -17,6 +22,74 @@ import hashlib
 import bcrypt
 
 ROOT_DIR = Path(__file__).parent
+
+# ── Per-contact async lock (Feature 1: Queue / serial processing per contact) ──
+_contact_locks: dict = {}
+_ai_semaphore: asyncio.Semaphore = None  # init after event loop starts
+
+def _get_contact_lock(key: str) -> asyncio.Lock:
+    if key not in _contact_locks:
+        _contact_locks[key] = asyncio.Lock()
+    return _contact_locks[key]
+
+# ── Template variable resolver (Feature 4) ──
+_DAY_ID = ["Minggu","Senin","Selasa","Rabu","Kamis","Jumat","Sabtu"]
+def resolve_template(text: str, contact: dict = None, tz_offset: int = 7) -> str:
+    if not text:
+        return text
+    now_utc = datetime.utcnow()
+    now_local = now_utc + timedelta(hours=tz_offset)
+    c = contact or {}
+    replacements = {
+        "{{nama}}": c.get("name", ""),
+        "{{no_wa}}": c.get("phone") or re.sub(r'@[\w.]+$', '', c.get("chatId", "")),
+        "{{tanggal}}": now_local.strftime("%d/%m/%Y"),
+        "{{waktu}}": now_local.strftime("%H:%M"),
+        "{{hari}}": _DAY_ID[now_local.weekday() + 1 if now_local.weekday() < 6 else 0],
+        "{{bulan}}": now_local.strftime("%B"),
+        "{{tahun}}": now_local.strftime("%Y"),
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, str(v))
+    return text
+
+# ── Telegram notification (Feature 6) ──
+async def send_telegram_alert(token: str, chat_id: str, message: str):
+    if not token or not chat_id:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            )
+    except Exception:
+        pass
+
+# ── Working hours check per-day (Feature 5) ──
+def is_within_working_hours(cfg: dict, tz_offset: int = 7) -> bool:
+    if not cfg.get("workingHoursEnabled"):
+        return True
+    now = datetime.utcnow() + timedelta(hours=tz_offset)
+    weekday = now.weekday()  # 0=Mon … 6=Sun
+    day_key = str(weekday)
+    schedule_raw = cfg.get("workingHoursSchedule", "")
+    if schedule_raw:
+        try:
+            schedule = json.loads(schedule_raw) if isinstance(schedule_raw, str) else schedule_raw
+            day_cfg = schedule.get(day_key)
+            if not day_cfg or not day_cfg.get("enabled", True):
+                return False
+            start = day_cfg.get("start", "00:00")
+            end = day_cfg.get("end", "23:59")
+        except Exception:
+            start = cfg.get("workingHoursStart", "08:00")
+            end = cfg.get("workingHoursEnd", "21:00")
+    else:
+        start = cfg.get("workingHoursStart", "08:00")
+        end = cfg.get("workingHoursEnd", "21:00")
+    now_t = now.strftime("%H:%M")
+    return start <= now_t <= end
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
@@ -291,6 +364,8 @@ async def seed_defaults():
             ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
             ("ruleAiEnabled", False), ("isBotActive", False), ("aiEnabled", True),
             ("messageRetentionDays", 90), ("timezone", "WIB"),
+            ("telegramBotToken", ""), ("telegramChatId", ""), ("telegramNotifyEnabled", False),
+            ("autoLabels", "[]"), ("workingHoursSchedule", ""),
         ]
         for key, default_val in required_defaults:
             try:
@@ -589,8 +664,11 @@ async def seed_docs():
 
 @app.on_event("startup")
 async def startup():
+    global _ai_semaphore
+    _ai_semaphore = asyncio.Semaphore(5)  # max 5 concurrent AI calls
     await db.sessions.create_index("expires_at", expireAfterSeconds=0)
     await db.users.create_index("username", unique=True)
+    await db.conversation_summaries.create_index([("chatId", 1), ("userId", 1)])
     await seed_defaults()
     logger.info("ChatBot Manager backend started")
 
@@ -864,16 +942,27 @@ async def get_dashboard_stats(current_user: Dict = Depends(get_current_user)):
         {"$match": {"userId": uid}},
         {"$group": {"_id": None,
             "totalTokens": {"$sum": "$tokensUsed"},
-            "aiCalls": {"$sum": {"$cond": [{"$in": ["$responseType", ["ai", "combo"]]}, 1, 0]}}
+            "aiCalls":    {"$sum": {"$cond": [{"$in": ["$responseType", ["ai", "combo"]]}, 1, 0]}},
+            "ruleCalls":  {"$sum": {"$cond": [{"$eq": ["$responseType", "rule"]},   1, 0]}},
+            "comboCalls": {"$sum": {"$cond": [{"$eq": ["$responseType", "combo"]},  1, 0]}},
+            "incomingCount": {"$sum": {"$cond": [{"$eq": ["$direction", "incoming"]}, 1, 0]}},
+            "outgoingCount": {"$sum": {"$cond": [{"$eq": ["$direction", "outgoing"]}, 1, 0]}},
         }}
     ]
     agg = await db.messages.aggregate(pipeline).to_list(1)
-    tokens_used = agg[0]["totalTokens"] if agg else 0
-    ai_calls = agg[0]["aiCalls"] if agg else 0
+    agg0 = agg[0] if agg else {}
+    tokens_used    = agg0.get("totalTokens", 0)
+    ai_calls       = agg0.get("aiCalls", 0)
+    rule_calls     = agg0.get("ruleCalls", 0)
+    combo_calls    = agg0.get("comboCalls", 0)
+    incoming_count = agg0.get("incomingCount", 0)
+    outgoing_count = agg0.get("outgoingCount", 0)
+
+    # Top rules by hit count
+    top_rules = await db.rules.find({"userId": uid}, {"_id": 0, "name": 1, "hitCount": 1}).sort("hitCount", -1).to_list(5)
 
     cfg = await _get_user_config(uid)
     bot_active = cfg.get("isBotActive", False)
-
     total_users = await db.users.count_documents({})
     active_users = await db.users.count_documents({"isActive": True})
 
@@ -882,8 +971,13 @@ async def get_dashboard_stats(current_user: Dict = Depends(get_current_user)):
         "totalContacts": total_contacts,
         "activeRules": active_rules,
         "aiCalls": ai_calls,
+        "ruleCalls": rule_calls,
+        "comboCalls": combo_calls,
         "tokensUsed": tokens_used,
+        "incomingCount": incoming_count,
+        "outgoingCount": outgoing_count,
         "botActive": bot_active,
+        "topRules": top_rules,
         "uptime": "99.8%",
         "avgResponseTime": "1.2s",
         "totalUsers": total_users,
@@ -1250,19 +1344,76 @@ async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_cu
     count = len(contacts)
     await add_log("BROADCAST_SENT", f"[{current_user['username']}] Broadcast dikirim ke {count} kontak")
 
+    cfg = await _get_user_config(uid)
+    tz_offset = {"WIB": 7, "WITA": 8, "WIT": 9}.get(cfg.get("timezone", "WIB"), 7)
+
     for c in contacts:
+        chat_id = c.get("chatId", "unknown")
+        contact_doc = await db.contacts.find_one({"chatId": chat_id, "userId": uid}) or {}
+        resolved_msg = resolve_template(req.message, contact_doc, tz_offset)
         await db.messages.insert_one({
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-            "chatId": c.get("chatId", "unknown"),
+            "chatId": chat_id,
             "userId": uid,
             "direction": "outgoing",
-            "message": req.message[:200],
+            "message": resolved_msg[:200],
             "responseType": "broadcast",
             "tokensUsed": 0
         })
 
     await log_user_activity(uid, current_user["username"], "BROADCAST_SENT", f"Broadcast ke {count} kontak")
     return {"success": True, "sent": count}
+
+# ============================================================
+# EXPORT (Feature 3)
+# ============================================================
+
+@api_router.get("/export/contacts")
+async def export_contacts(fmt: str = "csv", current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    contacts = await db.contacts.find({"userId": uid}, {"_id": 0}).to_list(10000)
+    if fmt == "json":
+        return contacts
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["chatId","name","phone","tag","note","isBlocked","lastSeen","messageCount","createdAt"])
+    for c in contacts:
+        w.writerow([c.get("chatId",""), c.get("name",""), c.get("phone",""), c.get("tag",""),
+                    c.get("note",""), c.get("isBlocked",False), c.get("lastSeen",""),
+                    c.get("messageCount",0), c.get("createdAt","")])
+    buf.seek(0)
+    return StreamingResponse(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=contacts.csv"})
+
+@api_router.get("/export/messages")
+async def export_messages(fmt: str = "csv", current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    messages = await db.messages.find({"userId": uid}, {"_id": 0}).sort("timestamp", -1).to_list(10000)
+    if fmt == "json":
+        return messages
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["timestamp","chatId","direction","message","responseType","tokensUsed"])
+    for m in messages:
+        w.writerow([m.get("timestamp",""), m.get("chatId",""), m.get("direction",""),
+                    m.get("message",""), m.get("responseType",""), m.get("tokensUsed",0)])
+    buf.seek(0)
+    return StreamingResponse(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=messages.csv"})
+
+@api_router.get("/export/rules")
+async def export_rules(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    rules = await db.rules.find({"userId": uid}, {"_id": 0}).to_list(1000)
+    return rules
+
+@api_router.get("/export/knowledge")
+async def export_knowledge(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    items = await db.knowledge.find({"userId": uid}, {"_id": 0}).to_list(1000)
+    return items
 
 # ============================================================
 # LOGS
@@ -1647,6 +1798,15 @@ async def receive_webhook(token: str, request: Request):
 
     uid = str(user.get("id", ""))
 
+    # Feature 1: per-contact serial processing lock
+    contact_lock_key = f"{uid}:{chat_id}"
+    contact_lock = _get_contact_lock(contact_lock_key)
+
+    async with contact_lock:
+        return await _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body, msg_type, event)
+
+
+async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body, msg_type, event):
     # Load user-specific config (with fallback to global defaults)
     cfg = await _get_user_config(uid)
 
@@ -1670,6 +1830,18 @@ async def receive_webhook(token: str, request: Request):
     if contact and contact.get("isBlocked"):
         await add_log("WEBHOOK_SKIP", f"[{user['username']}] Kontak {chat_id} diblokir", uid)
         return {"success": True, "processed": False, "reason": "blocked"}
+
+    # Feature 5: per-day working hours check
+    tz_map = {"WIB": 7, "WITA": 8, "WIT": 9}
+    tz_offset = tz_map.get(cfg.get("timezone", "WIB"), 7)
+    if not is_within_working_hours(cfg, tz_offset):
+        offline_msg = cfg.get("offlineMessage", "")
+        if offline_msg:
+            offline_resolved = resolve_template(offline_msg, contact or {}, tz_offset)
+            if waha_url:
+                await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, offline_resolved)
+        await add_log("WEBHOOK_SKIP", f"[{user['username']}] Di luar jam operasional — pesan offline dikirim", uid)
+        return {"success": True, "processed": False, "reason": "outside_working_hours"}
 
     await add_log("MESSAGE_IN", f"[{user['username']}] Pesan dari {chat_id}: '{body[:80]}'", uid)
 
@@ -1735,14 +1907,34 @@ async def receive_webhook(token: str, request: Request):
     await db.contacts.update_one(
         {"chatId": chat_id, "userId": uid},
         {"$set": {
-            "chatId": chat_id,
-            "userId": uid,
-            "phone": phone_display,
-            "lastSeen": now_str,
-            "name": contact_name,
+            "chatId": chat_id, "userId": uid, "phone": phone_display,
+            "lastSeen": now_str, "name": contact_name,
         }, "$setOnInsert": {"isBlocked": False, "tag": "", "createdAt": now_str}},
         upsert=True
     )
+    # Reload contact after upsert for auto-labeling
+    contact_doc = await db.contacts.find_one({"chatId": chat_id, "userId": uid}) or {}
+
+    # Feature 8: Auto-labeling based on keywords
+    try:
+        auto_labels_raw = cfg.get("autoLabels", "[]")
+        auto_labels = json.loads(auto_labels_raw) if isinstance(auto_labels_raw, str) else auto_labels_raw
+        if auto_labels:
+            current_tags = set(t.strip() for t in (contact_doc.get("tag") or "").split(",") if t.strip())
+            new_tags = set(current_tags)
+            for rule_label in auto_labels:
+                kw = rule_label.get("keyword", "").lower().strip()
+                tag = rule_label.get("tag", "").strip()
+                if kw and tag and kw in msg_lower:
+                    new_tags.add(tag)
+            if new_tags != current_tags:
+                await db.contacts.update_one(
+                    {"chatId": chat_id, "userId": uid},
+                    {"$set": {"tag": ",".join(sorted(new_tags))}}
+                )
+                contact_doc["tag"] = ",".join(sorted(new_tags))
+    except Exception:
+        pass
 
     # ── Step 1: Rules engine ──────────────────────────────────
     reply_text = None
@@ -1772,6 +1964,10 @@ async def receive_webhook(token: str, request: Request):
             rule_text = rule.get("response", "")
             rule_matched_name = rule.get("name", "?")
             rule_mode = rule.get("responseMode", default_mode)
+            # Feature 7: increment hit counter
+            await db.rules.update_one({"id": rule.get("id"), "userId": uid}, {"$inc": {"hitCount": 1}})
+            # Feature 4: resolve template variables in rule response
+            rule_text = resolve_template(rule_text, contact_doc, tz_offset)
             if rule_mode == "direct":
                 reply_text = rule_text
                 response_type = "rule"
@@ -1846,8 +2042,43 @@ async def receive_webhook(token: str, request: Request):
                     await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI tidak dikonfigurasi — fallback ke Knowledge Base langsung", uid)
                 else:
                     await add_log("AI_ERROR", f"[{user['username']}] ✗ AI tidak dikonfigurasi dan tidak ada rule/KB — tidak ada balasan", uid)
+                    # Feature 6: Telegram notif
+                    if cfg.get("telegramNotifyEnabled") and cfg.get("telegramBotToken"):
+                        await send_telegram_alert(
+                            cfg["telegramBotToken"], cfg.get("telegramChatId",""),
+                            f"⚠️ <b>Pesan tidak terjawab</b>\nDari: {contact_doc.get('name','?')} ({chat_id})\nPesan: {body[:200]}"
+                        )
                     return {"success": True, "processed": False, "reason": "ai_not_configured_no_fallback"}
             else:
+                # Feature 2: Summarization — ambil ringkasan percakapan lama jika ada
+                total_hist = await db.messages.count_documents({"chatId": chat_id, "userId": uid})
+                conv_summary = ""
+                if total_hist > memory_limit * 3:
+                    sum_doc = await db.conversation_summaries.find_one({"chatId": chat_id, "userId": uid})
+                    if sum_doc:
+                        conv_summary = sum_doc.get("summary", "")
+                    else:
+                        # Buat ringkasan dari pesan lama
+                        old_docs = await db.messages.find(
+                            {"chatId": chat_id, "userId": uid, "direction": {"$in": ["incoming","outgoing"]}}
+                        ).sort("timestamp", 1).to_list(memory_limit * 3)
+                        old_text = "\n".join(
+                            f"{'User' if d['direction']=='incoming' else 'Bot'}: {d['message'][:100]}"
+                            for d in old_docs[:memory_limit * 2]
+                        )
+                        sum_prompt = [{"role": "user", "content": f"Ringkas percakapan berikut dalam 2-3 kalimat:\n\n{old_text}"}]
+                        sum_result, _ = await call_ai(provider, model, ai_api_key,
+                            "Kamu adalah asisten ringkasan percakapan.", sum_prompt, 0.3, 200, cfg.get("ollamaUrl",""))
+                        if sum_result:
+                            conv_summary = sum_result
+                            await db.conversation_summaries.update_one(
+                                {"chatId": chat_id, "userId": uid},
+                                {"$set": {"summary": sum_result, "updatedAt": datetime.utcnow().isoformat()}},
+                                upsert=True
+                            )
+                if conv_summary:
+                    system_prompt += f"\n\nRingkasan percakapan sebelumnya:\n{conv_summary}"
+
                 history_docs = await db.messages.find(
                     {"chatId": chat_id, "userId": uid, "direction": {"$in": ["incoming", "outgoing"]}}
                 ).sort("timestamp", -1).to_list(memory_limit * 2)
@@ -1891,6 +2122,12 @@ async def receive_webhook(token: str, request: Request):
 
     if not reply_text:
         await add_log("AI_ERROR", f"[{user['username']}] Tidak ada balasan yang dihasilkan untuk {chat_id}", uid)
+        # Feature 6: Telegram notification when no answer
+        if cfg.get("telegramNotifyEnabled") and cfg.get("telegramBotToken"):
+            await send_telegram_alert(
+                cfg["telegramBotToken"], cfg.get("telegramChatId",""),
+                f"⚠️ <b>Pesan tidak terjawab</b>\nDari: {contact_doc.get('name','?')} ({chat_id})\nPesan: {body[:200]}"
+            )
         return {"success": True, "processed": False, "reason": "no_reply_generated"}
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
