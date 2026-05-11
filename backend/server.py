@@ -2130,12 +2130,12 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
     if _looks_like_indonesian_phone(phone_num):
         phone_num = _digits_to_indonesia(phone_num)
 
-    # Build display phone — blank if still a LID-derived non-numeric value
-    _is_unresolved_lid = _is_lid(chat_id) and not _best_cus and not _looks_like_indonesian_phone(phone_num) and not _re.match(r'^\d{6,}$', phone_num)
-    if _is_unresolved_lid:
-        phone_display = ""
-    else:
+    # Build display phone — only trust the number if it came from @c.us OR looks like a valid Indonesian phone
+    _phone_is_real = bool(_best_cus) or _looks_like_indonesian_phone(phone_num) or (not _is_lid(chat_id) and bool(_re.match(r'^\d{6,15}$', phone_num)))
+    if _phone_is_real and phone_num:
         phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
+    else:
+        phone_display = ""
 
     # Extract contact name from every possible webhook field
     contact_name = (
@@ -2148,7 +2148,8 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         msg_payload.get("_data", {}).get("notifyName") or
         msg_payload.get("_data", {}).get("pushName") or
         (msg_payload.get("_data", {}).get("sender") or {}).get("name") or
-        phone_display
+        phone_display or
+        f"WA-{_re.sub(r'@[\w.]+$', '', chat_id)[-6:]}"
     )
 
     # Update/create contact — only overwrite phone if we have a real number
