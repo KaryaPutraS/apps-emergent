@@ -1563,20 +1563,34 @@ async def reset_config(current_user: Dict = Depends(get_current_user)):
     await db.rules.delete_many({"userId": uid})
     await db.knowledge.delete_many({"userId": uid})
     await db.templates.delete_many({"userId": uid})
-    # Reset AI agent config to factory defaults
-    ai_defaults = {
+    # Reset AI agent config — DELETE user-specific entries so _get_user_config
+    # falls back to global defaults. Setting to "" doesn't work because the
+    # config loader intentionally ignores empty user values to avoid wiping
+    # working config during migrations.
+    ai_keys = [
+        "systemPrompt", "businessInfo",
+        "aiProvider", "aiModel", "aiApiKey", "ollamaUrl",
+        "aiTemperature", "aiMaxTokens",
+        "memoryLimit", "memoryTimeoutMinutes",
+        "ruleAiEnabled",
+    ]
+    await db.config.delete_many({"key": {"$in": ai_keys}, "userId": uid})
+    # For the first admin (userId may equal "" or stored as global), also clear
+    # global non-default values so the UI doesn't keep showing old data.
+    factory_defaults = {
         "systemPrompt": "", "businessInfo": "",
         "aiProvider": "", "aiModel": "", "aiApiKey": "", "ollamaUrl": "",
         "aiTemperature": 0.7, "aiMaxTokens": 500,
         "memoryLimit": 10, "memoryTimeoutMinutes": 30,
         "ruleAiEnabled": False,
     }
-    for key, default_val in ai_defaults.items():
-        await db.config.update_one(
-            {"key": key, "userId": uid},
-            {"$set": {"key": key, "userId": uid, "value": default_val, "updated_at": datetime.utcnow()}},
-            upsert=True
-        )
+    if uid in ("", None):
+        for key, default_val in factory_defaults.items():
+            await db.config.update_one(
+                {"key": key, "userId": ""},
+                {"$set": {"key": key, "userId": "", "value": default_val, "updated_at": datetime.utcnow()}},
+                upsert=True
+            )
     await add_log("RESET_CONFIG", f"[{current_user['username']}] Konfigurasi BOT direset (Rules, Knowledge, Template, AI Agent)", uid)
     return {"success": True, "message": "Konfigurasi BOT berhasil direset. Rules, Knowledge, Template, dan AI Agent dikosongkan."}
 
