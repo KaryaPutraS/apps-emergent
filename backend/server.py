@@ -1982,45 +1982,88 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
     import re as _re
     from urllib.parse import quote as _url_quote
     phone_num = _re.sub(r'@[\w.]+$', '', chat_id)
-    # If LID format (@lid), the number is an internal WhatsApp ID, not a real phone number.
-    # Try to resolve via WAHA contacts API.
-    if chat_id.endswith("@lid") and waha_url:
-        try:
-            _waha_headers = {"X-Api-Key": waha_api_key} if waha_api_key else {}
-            _encoded_id = _url_quote(chat_id, safe='')
-            async with httpx.AsyncClient(timeout=5) as _wc:
-                _resp = await _wc.get(
-                    f"{waha_url}/api/{waha_session}/contacts/{_encoded_id}",
-                    headers=_waha_headers,
-                )
-                await add_log("SYSTEM", f"[lid-resolve] status={_resp.status_code} body={_resp.text[:200]}", uid)
-                if _resp.status_code == 200:
-                    _cdata = _resp.json()
-                    # WAHA may return 'number', 'phone', or 'id' in @c.us format
-                    _resolved = (
-                        _cdata.get("number") or
-                        _cdata.get("phone") or
-                        _cdata.get("phoneNumber") or ""
+
+    # ── @lid resolution: try multiple strategies ─────────────────────────────
+    if chat_id.endswith("@lid"):
+        _waha_headers = {"X-Api-Key": waha_api_key} if waha_api_key else {}
+        _resolved_phone = ""
+
+        # Strategy A: check webhook payload fields first (no extra HTTP call)
+        for _field in ("from", "author", "participant"):
+            _val = msg_payload.get(_field, "")
+            if _val and "@c.us" in str(_val):
+                _resolved_phone = str(_val).replace("@c.us", "").lstrip("+")
+                break
+        # Also check nested sender object
+        if not _resolved_phone:
+            _sender = msg_payload.get("sender") or {}
+            if isinstance(_sender, dict):
+                _sid = _sender.get("id", "") or _sender.get("phone", "")
+                if _sid and "@c.us" in str(_sid):
+                    _resolved_phone = str(_sid).replace("@c.us", "").lstrip("+")
+
+        # Strategy B: WAHA contacts endpoint
+        if not _resolved_phone and waha_url:
+            try:
+                _encoded_id = _url_quote(chat_id, safe='')
+                async with httpx.AsyncClient(timeout=6) as _wc:
+                    _resp = await _wc.get(
+                        f"{waha_url}/api/{waha_session}/contacts/{_encoded_id}",
+                        headers=_waha_headers,
                     )
-                    if not _resolved:
-                        # Try extracting from returned id if it's @c.us format
-                        _rid = _cdata.get("id", "")
-                        if _rid and "@c.us" in _rid:
-                            _resolved = _rid.replace("@c.us", "")
-                    if _resolved and _re.match(r'^\d{6,}$', str(_resolved).lstrip("+")):
-                        phone_num = str(_resolved).lstrip("+")
-        except Exception as _e:
-            await add_log("SYSTEM", f"[lid-resolve] error: {_e}", uid)
+                    if _resp.status_code == 200:
+                        _cd = _resp.json()
+                        _raw = (
+                            _cd.get("number") or _cd.get("phone") or
+                            _cd.get("phoneNumber") or _cd.get("pushphone") or ""
+                        )
+                        if not _raw:
+                            _rid = _cd.get("id", "")
+                            if _rid and "@c.us" in _rid:
+                                _raw = _rid.replace("@c.us", "").lstrip("+")
+                        if _raw and _re.match(r'^\d{6,}$', str(_raw).lstrip("+")):
+                            _resolved_phone = str(_raw).lstrip("+")
+                    await add_log("SYSTEM", f"[lid-A] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
+            except Exception as _e:
+                await add_log("SYSTEM", f"[lid-A] error: {_e}", uid)
+
+        # Strategy C: WAHA chats endpoint (often maps lid→c.us)
+        if not _resolved_phone and waha_url:
+            try:
+                _encoded_id = _url_quote(chat_id, safe='')
+                async with httpx.AsyncClient(timeout=6) as _wc:
+                    _resp = await _wc.get(
+                        f"{waha_url}/api/{waha_session}/chats/{_encoded_id}",
+                        headers=_waha_headers,
+                    )
+                    if _resp.status_code == 200:
+                        _cd = _resp.json()
+                        # chats may return id/contact.id in @c.us format
+                        _cid = _cd.get("id", "") or (_cd.get("contact") or {}).get("id", "")
+                        if _cid and "@c.us" in str(_cid):
+                            _resolved_phone = str(_cid).replace("@c.us", "").lstrip("+")
+                    await add_log("SYSTEM", f"[lid-C] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
+            except Exception as _e:
+                await add_log("SYSTEM", f"[lid-C] error: {_e}", uid)
+
+        if _resolved_phone and _re.match(r'^\d{6,}$', _resolved_phone):
+            phone_num = _resolved_phone
+
     # If still LID-derived (not resolved), don't store it as a fake phone number
     if chat_id.endswith("@lid") and phone_num == _re.sub(r'@[\w.]+$', '', chat_id):
         phone_display = ""
     else:
         phone_display = ('+' + phone_num) if _re.match(r'^\d{6,}$', phone_num) else phone_num
 
+    # Extract contact name from every possible webhook field
     contact_name = (
         msg_payload.get("notifyName") or
         msg_payload.get("pushName") or
+        msg_payload.get("notifyname") or
+        (msg_payload.get("sender") or {}).get("name") or
+        (msg_payload.get("sender") or {}).get("pushName") or
         msg_payload.get("_data", {}).get("notifyName") or
+        msg_payload.get("_data", {}).get("pushName") or
         phone_display
     )
 
