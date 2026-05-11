@@ -2263,20 +2263,54 @@ async def _call_openai_compat(base_url: str, model: str, api_key: str, system_pr
 async def _call_gemini(model: str, api_key: str, system_prompt: str,
                        messages: list, temperature: float, max_tokens: int) -> tuple:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    # Build contents, converting role names (assistant→model for Gemini)
     contents = []
     for m in messages:
         role = "user" if m["role"] == "user" else "model"
-        contents.append({"role": role, "parts": [{"text": m["content"]}]})
+        text_content = (m.get("content") or "").strip()
+        if text_content:
+            contents.append({"role": role, "parts": [{"text": text_content}]})
+
+    # Gemini REQUIRES conversation to start with role "user".
+    # Drop any leading "model" messages (can happen if oldest history entry is a bot reply).
+    while contents and contents[0]["role"] != "user":
+        contents.pop(0)
+
+    # Merge any consecutive same-role messages that slipped through
+    merged_contents = []
+    for c in contents:
+        if merged_contents and merged_contents[-1]["role"] == c["role"]:
+            merged_contents[-1]["parts"][0]["text"] += "\n" + c["parts"][0]["text"]
+        else:
+            merged_contents.append(c)
+    contents = merged_contents
+
+    if not contents:
+        await add_log("AI_ERROR", "Gemini: contents kosong setelah normalisasi — tidak ada riwayat valid")
+        return ("", 0)
+
+    # Ensure last message is user (required by Gemini)
+    if contents[-1]["role"] != "user":
+        await add_log("AI_ERROR", f"Gemini: pesan terakhir bukan user (role={contents[-1]['role']}) — abaikan")
+        return ("", 0)
+
+    # Ensure maxOutputTokens is valid
+    safe_max_tokens = max(50, int(max_tokens or 500))
+
     body = {
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "systemInstruction": {"parts": [{"text": system_prompt or "Kamu adalah asisten yang membantu."}]},
         "contents": contents,
-        "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": safe_max_tokens},
     }
     headers = {"x-goog-api-key": api_key}
+
+    await add_log("AI_CALL", f"Gemini DEBUG → model={model} maxTokens={safe_max_tokens} contents={len(contents)} turns lastRole={contents[-1]['role']}")
+
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(url, json=body, headers=headers)
         if r.status_code != 200:
-            await add_log("AI_ERROR", f"Gemini HTTP {r.status_code}: {r.text[:300]}")
+            await add_log("AI_ERROR", f"Gemini HTTP {r.status_code}: {r.text[:400]}")
             r.raise_for_status()
         data = r.json()
         candidates = data.get("candidates", [])
@@ -2287,13 +2321,19 @@ async def _call_gemini(model: str, api_key: str, system_prompt: str,
         candidate = candidates[0]
         finish_reason = candidate.get("finishReason", "UNKNOWN")
         if finish_reason not in ("STOP", "MAX_TOKENS"):
-            await add_log("AI_ERROR", f"Gemini: finishReason={finish_reason} (bukan STOP). Safety/quota issue?")
+            await add_log("AI_ERROR", f"Gemini: finishReason={finish_reason}. Safety/quota/format issue?")
+            if finish_reason == "SAFETY":
+                await add_log("AI_ERROR", f"Gemini safety ratings: {candidate.get('safetyRatings', [])}")
             return ("", 0)
         parts = candidate.get("content", {}).get("parts", [])
         if not parts:
             await add_log("AI_ERROR", f"Gemini: parts kosong. finishReason={finish_reason}")
             return ("", 0)
         text = parts[0].get("text", "").strip()
+        if not text:
+            raw = parts[0].get("text", "")
+            await add_log("AI_ERROR", f"Gemini: text kosong setelah strip. raw='{repr(raw[:50])}' finishReason={finish_reason}")
+            return ("", 0)
         tokens = data.get("usageMetadata", {}).get("totalTokenCount", 0)
         return (text, tokens)
 
