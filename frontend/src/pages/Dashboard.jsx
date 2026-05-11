@@ -101,7 +101,7 @@ const Dashboard = () => {
             Halo, {currentUser?.fullName || currentUser?.username || 'Admin'} 👋
           </h1>
           <div className="flex items-center gap-2 mt-1">
-            <p className="text-slate-500 text-sm">Ringkasan aktivitas chatbot Anda</p>
+            <p className="text-slate-500 text-sm">Ringkasan aktivitas adminpintar.id Anda</p>
             <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${roleCfg.color}`}>
               <RoleIcon className="w-3 h-3" />
               {roleCfg.label}

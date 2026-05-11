@@ -190,6 +190,10 @@ class BroadcastSend(BaseModel):
     customNumbers: Optional[str] = None
     message: str
 
+class BroadcastSendOne(BaseModel):
+    chatId: str
+    message: str
+
 class TestRequest(BaseModel):
     message: str
 
@@ -1378,6 +1382,41 @@ async def send_broadcast(req: BroadcastSend, current_user: Dict = Depends(get_cu
     await log_user_activity(uid, current_user["username"], "BROADCAST_SENT", f"Broadcast ke {count} kontak")
     return {"success": True, "sent": count}
 
+@api_router.post("/broadcast/send-one")
+async def send_broadcast_one(req: BroadcastSendOne, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong")
+    if not req.chatId:
+        raise HTTPException(status_code=400, detail="chatId diperlukan")
+
+    cfg = await _get_user_config(uid)
+    waha_url = cfg.get("wahaUrl", "").rstrip("/")
+    waha_session = cfg.get("wahaSession", "default") or "default"
+    waha_api_key = cfg.get("wahaApiKey", "")
+    tz_offset = {"WIB": 7, "WITA": 8, "WIT": 9}.get(cfg.get("timezone", "WIB"), 7)
+
+    contact_doc = await db.contacts.find_one({"chatId": req.chatId, "userId": uid}) or {}
+    resolved_msg = resolve_template(req.message, contact_doc, tz_offset)
+
+    # Actually send via WAHA
+    if waha_url:
+        try:
+            await send_waha_text(waha_url, waha_session, waha_api_key, req.chatId, resolved_msg)
+        except Exception as _e:
+            raise HTTPException(status_code=502, detail=f"Gagal kirim via WAHA: {_e}")
+
+    await db.messages.insert_one({
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "chatId": req.chatId,
+        "userId": uid,
+        "direction": "outgoing",
+        "message": resolved_msg[:500],
+        "responseType": "broadcast",
+        "tokensUsed": 0,
+    })
+    return {"success": True, "chatId": req.chatId}
+
 # ============================================================
 # EXPORT (Feature 3)
 # ============================================================
@@ -1524,11 +1563,22 @@ async def reset_config(current_user: Dict = Depends(get_current_user)):
     await db.rules.delete_many({"userId": uid})
     await db.knowledge.delete_many({"userId": uid})
     await db.templates.delete_many({"userId": uid})
-    ai_keys = ["systemPrompt", "businessInfo", "aiTemperature", "aiMaxTokens", "memoryLimit", "memoryTimeoutMinutes", "ruleAiEnabled"]
-    for key in ai_keys:
-        await db.config.update_one({"key": key, "userId": uid}, {"$set": {"value": ""}})
-    await add_log("RESET_CONFIG", f"[{current_user['username']}] Konfigurasi BOT direset", uid)
-    return {"success": True, "message": "Konfigurasi BOT berhasil direset. Rules, Knowledge, Template dikosongkan."}
+    # Reset AI agent config to factory defaults
+    ai_defaults = {
+        "systemPrompt": "", "businessInfo": "",
+        "aiProvider": "", "aiModel": "", "aiApiKey": "", "ollamaUrl": "",
+        "aiTemperature": 0.7, "aiMaxTokens": 500,
+        "memoryLimit": 10, "memoryTimeoutMinutes": 30,
+        "ruleAiEnabled": False,
+    }
+    for key, default_val in ai_defaults.items():
+        await db.config.update_one(
+            {"key": key, "userId": uid},
+            {"$set": {"key": key, "userId": uid, "value": default_val, "updated_at": datetime.utcnow()}},
+            upsert=True
+        )
+    await add_log("RESET_CONFIG", f"[{current_user['username']}] Konfigurasi BOT direset (Rules, Knowledge, Template, AI Agent)", uid)
+    return {"success": True, "message": "Konfigurasi BOT berhasil direset. Rules, Knowledge, Template, dan AI Agent dikosongkan."}
 
 @api_router.post("/reset/dashboard")
 async def reset_dashboard(current_user: Dict = Depends(get_current_user)):
@@ -1922,13 +1972,17 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         phone_display
     )
 
-    # Update/create contact
+    # Update/create contact — only overwrite phone if we have a real number
+    _contact_set = {"chatId": chat_id, "userId": uid, "lastSeen": now_str, "name": contact_name}
+    if phone_display:
+        _contact_set["phone"] = phone_display
     await db.contacts.update_one(
         {"chatId": chat_id, "userId": uid},
-        {"$set": {
-            "chatId": chat_id, "userId": uid, "phone": phone_display,
-            "lastSeen": now_str, "name": contact_name,
-        }, "$setOnInsert": {"isBlocked": False, "tag": "", "createdAt": now_str}},
+        {
+            "$set": _contact_set,
+            "$inc": {"messageCount": 1},
+            "$setOnInsert": {"isBlocked": False, "tag": "", "note": "", "phone": phone_display or "", "createdAt": now_str},
+        },
         upsert=True
     )
     # Reload contact after upsert for auto-labeling

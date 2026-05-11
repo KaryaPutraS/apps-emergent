@@ -14,7 +14,7 @@ const aiSetupChips = [
   { label: '📦 Data contoh kosong', prompt: 'Buatkan 3 rules dasar (greeting, info bisnis, penutup), 2 knowledge umum, dan 2 template pesan sebagai contoh data awal yang bisa saya edit sendiri.' },
   { label: '🤖 Atur AI Agent', prompt: 'Bantu saya mengatur konfigurasi AI Agent: system prompt, informasi bisnis, temperatur AI, dan batasan token yang optimal.' },
 ];
-const defaultMessages = [{ role: 'assistant', content: 'Halo! Saya bisa bantu menyiapkan data chatbot. Pilih template bisnis di bawah atau ceritakan bisnis Anda untuk saya buatkan rules, knowledge, dan template secara otomatis.' }];
+const defaultMessages = [{ role: 'assistant', content: 'Halo! Saya bisa bantu menyiapkan data adminpintar.id. Pilih template bisnis di bawah atau ceritakan bisnis Anda untuk saya buatkan rules, knowledge, dan template secara otomatis.' }];
 
 const AISetup = () => {
   const [messages, setMessages] = useState(defaultMessages);

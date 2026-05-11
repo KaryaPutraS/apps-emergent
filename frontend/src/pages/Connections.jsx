@@ -512,7 +512,7 @@ const Connections = () => {
             </div>
             <p className="text-xs text-slate-400">
               Pastikan session WhatsApp sudah aktif sebelum memasang webhook.
-              Webhook akan menerima semua pesan masuk dan mengirimkannya ke chatbot.
+              Webhook akan menerima semua pesan masuk dan mengirimkannya ke adminpintar.id.
             </p>
 
             {/* Debug section */}

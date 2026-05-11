@@ -126,7 +126,7 @@ const Layout = () => {
               <Bot className="w-5 h-5 text-white" />
             </div>
             <div className={`ml-3 overflow-hidden transition-all duration-300 ${sidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 lg:opacity-0 lg:w-0'}`}>
-              <h1 className="font-bold text-sm whitespace-nowrap">ChatBot Manager</h1>
+              <h1 className="font-bold text-sm whitespace-nowrap">adminpintar.id</h1>
               <p className="text-[10px] text-slate-400 whitespace-nowrap">v1.2.0</p>
             </div>
             <button

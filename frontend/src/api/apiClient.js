@@ -279,6 +279,11 @@ export const sendBroadcast = async (params) => {
   return data;
 };
 
+export const sendBroadcastOne = async (chatId, message) => {
+  const { data } = await apiClient.post('/broadcast/send-one', { chatId, message });
+  return data;
+};
+
 // ============================================================
 // LOGS
 // ============================================================

@@ -53,7 +53,7 @@ const LoginPage = () => {
           <div className="text-center mb-8">
             <h1 className="text-2xl font-bold text-slate-900">Masuk ke Dashboard</h1>
             <p className="text-slate-500 mt-2 text-sm leading-relaxed">
-              ChatBot Manager — masukkan kredensial akun Anda.
+              adminpintar.id — masukkan kredensial akun Anda.
             </p>
           </div>
 
@@ -138,7 +138,7 @@ const LoginPage = () => {
         <div className="text-center mt-6">
           <p className="text-slate-500 text-xs flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5" />
-            Secured by ChatBot Manager v1.2.0
+            Secured by adminpintar.id v1.2.0
           </p>
         </div>
       </div>

@@ -20,13 +20,13 @@ const ROLE_CONFIG = {
     label: 'Super Admin',
     icon: Crown,
     badgeClass: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    desc: 'Hanya mengelola user — tidak punya akses ke fitur chatbot',
+    desc: 'Hanya mengelola user — tidak punya akses ke fitur adminpintar.id',
   },
   user: {
     label: 'User',
     icon: Briefcase,
     badgeClass: 'bg-blue-100 text-blue-700 border-blue-200',
-    desc: 'Akses penuh ke semua fitur chatbot',
+    desc: 'Akses penuh ke semua fitur adminpintar.id',
   },
 };
 
