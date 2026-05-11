@@ -2102,11 +2102,27 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                 ).sort("timestamp", -1).to_list(memory_limit * 2)
                 history_docs.reverse()
 
-                ai_messages = []
-                for h in history_docs[:-1]:
+                # Build AI messages, merging consecutive same-role messages.
+                # Gemini and Anthropic reject requests with consecutive messages of the same role.
+                # When the bot fails to reply, the history accumulates consecutive user messages.
+                merged: list = []
+                for h in history_docs[:-1]:  # exclude the current message (last/newest)
                     role = "user" if h["direction"] == "incoming" else "assistant"
-                    ai_messages.append({"role": role, "content": h["message"]})
-                ai_messages.append({"role": "user", "content": body})
+                    content = (h.get("message") or "").strip()
+                    if not content:
+                        continue
+                    if merged and merged[-1]["role"] == role:
+                        merged[-1]["content"] += "\n" + content  # merge into previous
+                    else:
+                        merged.append({"role": role, "content": content})
+
+                # Append current user message, merging if previous is also user
+                if merged and merged[-1]["role"] == "user":
+                    merged[-1]["content"] += "\n" + body
+                else:
+                    merged.append({"role": "user", "content": body})
+
+                ai_messages = merged
 
                 kb_info = f" + KB ({len(matched_items)} item)" if knowledge_context else ""
                 rule_info = f" + Rule" if rule_text else ""
