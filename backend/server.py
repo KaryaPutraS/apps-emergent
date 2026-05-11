@@ -82,7 +82,16 @@ def is_within_working_hours(cfg: dict, tz_offset: int = 7) -> bool:
     if schedule_raw:
         try:
             schedule = json.loads(schedule_raw) if isinstance(schedule_raw, str) else schedule_raw
-            day_cfg = schedule.get(day_key)
+            # schedule is a list: [{day:0,name:...,enabled:bool,start:HH:MM,end:HH:MM}, ...]
+            # Python weekday(): 0=Mon…6=Sun; our list index 0=Sun…6=Sat → map
+            # Frontend saves: index 0=Minggu(Sun), 1=Senin(Mon)…6=Sabtu(Sat)
+            # Python weekday 0=Mon → our list index 1, …, 6=Sun → index 0
+            py_to_list = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 0}
+            list_idx = py_to_list.get(weekday, weekday)
+            day_cfg = next((d for d in schedule if d.get("day") == list_idx), None)
+            if day_cfg is None:
+                # fallback: use index directly
+                day_cfg = schedule[list_idx] if list_idx < len(schedule) else None
             if not day_cfg or not day_cfg.get("enabled", True):
                 return False
             start = day_cfg.get("start", "00:00")
@@ -1808,7 +1817,12 @@ async def receive_webhook(token: str, request: Request):
     contact_lock = _get_contact_lock(contact_lock_key)
 
     async with contact_lock:
-        return await _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body, msg_type, event)
+        try:
+            return await _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body, msg_type, event)
+        except Exception as _exc:
+            logger.exception(f"[webhook] Unhandled exception in _process_webhook_inner for {chat_id}: {_exc}")
+            await add_log("SYSTEM_ERROR", f"[{user.get('username','?')}] ❌ Error tidak tertangani saat memproses pesan dari {chat_id}: {_exc}", uid)
+            return {"success": False, "error": str(_exc)}
 
 
 async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body, msg_type, event):
@@ -1920,6 +1934,12 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
     # Reload contact after upsert for auto-labeling
     contact_doc = await db.contacts.find_one({"chatId": chat_id, "userId": uid}) or {}
 
+    # ── Step 1: Rules engine ──────────────────────────────────
+    reply_text = None
+    response_type = "ai"
+    tokens_used = 0
+    msg_lower = body.lower()  # defined here so auto-labeling and rules both have access
+
     # Feature 8: Auto-labeling based on keywords
     try:
         auto_labels_raw = cfg.get("autoLabels", "[]")
@@ -1940,12 +1960,6 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                 contact_doc["tag"] = ",".join(sorted(new_tags))
     except Exception:
         pass
-
-    # ── Step 1: Rules engine ──────────────────────────────────
-    reply_text = None
-    response_type = "ai"
-    tokens_used = 0
-    msg_lower = body.lower()
     default_mode = cfg.get("defaultRuleResponseMode", "ai_context")  # direct / ai_polish / ai_context
 
     rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
@@ -2103,14 +2117,16 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                     reply_text = ai_reply
                     response_type = "ai"
                     await add_log("AI_CALL", f"[{user['username']}] ✅ AI menjawab ({len(ai_reply)} karakter, {tokens_used} token)", uid)
-                elif rule_text:
-                    reply_text = rule_text
-                    response_type = "rule"
-                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI gagal — fallback ke teks rule", uid)
-                elif knowledge_context:
-                    reply_text = "\n\n".join(f"{i['content']}" for i in matched_items[:3])
-                    response_type = "rule"
-                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI gagal — fallback ke Knowledge Base", uid)
+                else:
+                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI mengembalikan balasan kosong (provider={provider}, model={model}). Cek API key & kuota.", uid)
+                    if rule_text:
+                        reply_text = rule_text
+                        response_type = "rule"
+                        await add_log("AI_ERROR", f"[{user['username']}] ↩ Fallback ke teks rule", uid)
+                    elif knowledge_context:
+                        reply_text = "\n\n".join(f"{i['content']}" for i in matched_items[:3])
+                        response_type = "rule"
+                        await add_log("AI_ERROR", f"[{user['username']}] ↩ Fallback ke Knowledge Base", uid)
 
     # Mode ai_polish: rule teks sudah di-set, tapi perlu dipoles AI
     if reply_text and response_type == "rule" and rule_text and default_mode == "ai_polish" and ai_ready and reply_text == rule_text:
@@ -2201,7 +2217,8 @@ async def call_ai(provider: str, model: str, api_key: str, system_prompt: str,
             await add_log("AI_ERROR", f"Provider tidak dikenal: {provider}")
             return ("", 0)
     except Exception as e:
-        await add_log("AI_ERROR", f"AI call error ({provider}): {str(e)[:200]}")
+        logger.error(f"AI call exception ({provider}/{model}): {e}")
+        await add_log("AI_ERROR", f"❌ AI gagal ({provider}/{model}): {str(e)[:300]}")
         return ("", 0)
 
 
