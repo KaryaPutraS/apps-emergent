@@ -2093,8 +2093,34 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         _waha_headers = {"X-Api-Key": waha_api_key} if waha_api_key else {}
         _resolved_phone = ""
 
-        # Strategy B: WAHA contacts endpoint
+        # Strategy A (priority): WAHA Plus LID→PN mapping endpoint
+        # GOWS engine + PLUS tier returns: {"lid":"X@lid","pn":"6285...@c.us"}
         if waha_url:
+            try:
+                _lid_digits = chat_id.replace("@lid", "")
+                async with httpx.AsyncClient(timeout=6) as _wc:
+                    for _ep in (f"/api/{waha_session}/lids/{_lid_digits}",
+                                f"/api/{waha_session}/lid/{_lid_digits}"):
+                        try:
+                            _resp = await _wc.get(f"{waha_url}{_ep}", headers=_waha_headers)
+                            if _resp.status_code == 200:
+                                _cd = _resp.json()
+                                # Prefer explicit 'pn' field (WAHA Plus shape)
+                                _pn = _cd.get("pn", "") if isinstance(_cd, dict) else ""
+                                _m = _re.search(r'(\d{10,15})@c\.us', str(_pn) or json.dumps(_cd))
+                                if _m:
+                                    _resolved_phone = _m.group(1)
+                                    await add_log("SYSTEM", f"[lid-A] {_ep} pn={_pn} → phone={_resolved_phone}", uid)
+                                    break
+                                else:
+                                    await add_log("SYSTEM", f"[lid-A] {_ep} body={json.dumps(_cd)[:200]} → no @c.us match", uid)
+                        except Exception:
+                            continue
+            except Exception as _e:
+                await add_log("SYSTEM", f"[lid-A] error: {_e}", uid)
+
+        # Strategy B (fallback): WAHA contacts endpoint
+        if not _resolved_phone and waha_url:
             try:
                 _encoded_id = _url_quote(chat_id, safe='')
                 async with httpx.AsyncClient(timeout=6) as _wc:
@@ -2102,6 +2128,7 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                         f"{waha_url}/api/{waha_session}/contacts/{_encoded_id}",
                         headers=_waha_headers,
                     )
+                    _cd = {}
                     if _resp.status_code == 200:
                         _cd = _resp.json()
                         _raw = (
@@ -2114,80 +2141,9 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                                 _raw = _rid.replace("@c.us", "").lstrip("+")
                         if _raw and _re.match(r'^\d{6,}$', str(_raw).lstrip("+")):
                             _resolved_phone = str(_raw).lstrip("+")
-                    await add_log("SYSTEM", f"[lid-B] status={_resp.status_code} body={json.dumps(_cd)[:300]} → phone={_resolved_phone or 'none'}", uid)
+                    await add_log("SYSTEM", f"[lid-B] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
             except Exception as _e:
                 await add_log("SYSTEM", f"[lid-B] error: {_e}", uid)
-
-        # Strategy C: WAHA chats endpoint
-        if not _resolved_phone and waha_url:
-            try:
-                _encoded_id = _url_quote(chat_id, safe='')
-                async with httpx.AsyncClient(timeout=6) as _wc:
-                    _resp = await _wc.get(
-                        f"{waha_url}/api/{waha_session}/chats/{_encoded_id}",
-                        headers=_waha_headers,
-                    )
-                    if _resp.status_code == 200:
-                        _cd = _resp.json()
-                        _cid = _cd.get("id", "") or (_cd.get("contact") or {}).get("id", "")
-                        if _cid and "@c.us" in str(_cid):
-                            _resolved_phone = str(_cid).replace("@c.us", "").lstrip("+")
-                    await add_log("SYSTEM", f"[lid-C] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
-            except Exception as _e:
-                await add_log("SYSTEM", f"[lid-C] error: {_e}", uid)
-
-        # Strategy D: List all contacts and search for matching lid field
-        if not _resolved_phone and waha_url:
-            try:
-                _lid_only = chat_id.replace("@lid", "")
-                async with httpx.AsyncClient(timeout=10) as _wc:
-                    _resp = await _wc.get(
-                        f"{waha_url}/api/{waha_session}/contacts/all",
-                        headers=_waha_headers,
-                    )
-                    if _resp.status_code == 200:
-                        _all_contacts = _resp.json()
-                        if isinstance(_all_contacts, list):
-                            for _ct in _all_contacts:
-                                if not isinstance(_ct, dict):
-                                    continue
-                                # Check if this contact has a lid field matching ours
-                                _ct_lid = str(_ct.get("lid", "") or _ct.get("lidUser", "") or "")
-                                if _ct_lid and (_lid_only in _ct_lid or chat_id in _ct_lid):
-                                    _ct_id = _ct.get("id", "")
-                                    if _ct_id and "@c.us" in str(_ct_id):
-                                        _resolved_phone = str(_ct_id).replace("@c.us", "").lstrip("+")
-                                        break
-                            await add_log("SYSTEM", f"[lid-D] scanned {len(_all_contacts)} contacts → phone={_resolved_phone or 'none'}", uid)
-                        else:
-                            await add_log("SYSTEM", f"[lid-D] unexpected response shape: {str(_all_contacts)[:200]}", uid)
-                    else:
-                        await add_log("SYSTEM", f"[lid-D] status={_resp.status_code}", uid)
-            except Exception as _e:
-                await add_log("SYSTEM", f"[lid-D] error: {_e}", uid)
-
-        # Strategy E: WAHA Plus LID→PN mapping endpoint
-        if not _resolved_phone and waha_url:
-            try:
-                _lid_digits = chat_id.replace("@lid", "")
-                async with httpx.AsyncClient(timeout=6) as _wc:
-                    for _ep in (f"/api/{waha_session}/lids/{_lid_digits}",
-                                f"/api/{waha_session}/lid/{_lid_digits}",
-                                f"/api/{waha_session}/lids/pn/{_lid_digits}"):
-                        try:
-                            _resp = await _wc.get(f"{waha_url}{_ep}", headers=_waha_headers)
-                            if _resp.status_code == 200:
-                                _cd = _resp.json()
-                                _cd_str = json.dumps(_cd) if isinstance(_cd, (dict, list)) else str(_cd)
-                                _m = _re.search(r'(\d{10,15})@c\.us', _cd_str)
-                                if _m:
-                                    _resolved_phone = _m.group(1)
-                                    await add_log("SYSTEM", f"[lid-E] {_ep} → phone={_resolved_phone}", uid)
-                                    break
-                        except Exception:
-                            continue
-            except Exception as _e:
-                await add_log("SYSTEM", f"[lid-E] error: {_e}", uid)
 
         if _resolved_phone and _re.match(r'^\d{6,}$', _resolved_phone):
             phone_num = _resolved_phone
