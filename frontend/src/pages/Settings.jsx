@@ -152,25 +152,27 @@ const SettingsPage = () => {
         <div className="mt-4"><label className="text-sm font-medium text-slate-700 block mb-1.5">Pesan di Luar Jam</label><Textarea value={val('offlineMessage', '')} onChange={(e) => set('offlineMessage', e.target.value)} rows={3} /></div>
       </div>
 
-      {/* Telegram Notifications */}
+      {/* WA Owner Notifications */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><BellRing className="w-4 h-4 text-emerald-500" /> Notifikasi Telegram</h3>
-        <p className="text-sm text-slate-500 mb-4">Kirim alert ke Telegram ketika ada pesan yang tidak terjawab oleh bot.</p>
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4"><BellRing className="w-4 h-4 text-emerald-500" /> Notifikasi ke Owner WhatsApp</h3>
+        <p className="text-sm text-slate-500 mb-4">Kirim notifikasi ke nomor WhatsApp owner ketika ada pesan yang tidak bisa dijawab oleh bot.</p>
         <div className="flex items-center gap-3 mb-4">
-          <Switch checked={val('telegramNotifyEnabled', false)} onCheckedChange={(v) => set('telegramNotifyEnabled', v)} />
-          <span className="text-sm text-slate-700">Aktifkan Notifikasi Telegram</span>
+          <Switch checked={val('ownerNotifyEnabled', false)} onCheckedChange={(v) => set('ownerNotifyEnabled', v)} />
+          <span className="text-sm text-slate-700">Aktifkan Notifikasi ke Owner</span>
         </div>
-        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${!val('telegramNotifyEnabled', false) ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Bot Token</label>
-            <Input value={val('telegramBotToken', '')} onChange={(e) => set('telegramBotToken', e.target.value)} placeholder="1234567890:AAF..." />
+        <div className={val('ownerNotifyEnabled', false) ? '' : 'opacity-50 pointer-events-none'}>
+          <label className="text-sm font-medium text-slate-700 block mb-1.5">Nomor WhatsApp Owner</label>
+          <div className="flex items-center gap-2 max-w-sm">
+            <span className="text-sm text-slate-500 shrink-0">+</span>
+            <Input
+              value={val('ownerWhatsappNumber', '')}
+              onChange={(e) => set('ownerWhatsappNumber', e.target.value.replace(/\D/g, ''))}
+              placeholder="628123456789"
+              className="font-mono"
+            />
           </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Chat ID</label>
-            <Input value={val('telegramChatId', '')} onChange={(e) => set('telegramChatId', e.target.value)} placeholder="-100123456789" />
-          </div>
+          <p className="text-xs text-slate-400 mt-2">Masukkan nomor lengkap dengan kode negara tanpa tanda <span className="font-mono">+</span>, contoh: <span className="font-mono">628123456789</span>. Notifikasi dikirim melalui sesi WAHA yang aktif.</p>
         </div>
-        <p className="text-xs text-slate-400 mt-3">Buat bot via <span className="font-mono">@BotFather</span>, lalu dapatkan Chat ID via <span className="font-mono">@userinfobot</span> atau API getUpdates.</p>
       </div>
 
       {/* Auto-Labels */}

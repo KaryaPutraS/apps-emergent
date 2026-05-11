@@ -53,16 +53,21 @@ def resolve_template(text: str, contact: dict = None, tz_offset: int = 7) -> str
         text = text.replace(k, str(v))
     return text
 
-# ── Telegram notification (Feature 6) ──
-async def send_telegram_alert(token: str, chat_id: str, message: str):
-    if not token or not chat_id:
+# ── WhatsApp owner notification (Feature 6) ──
+async def send_owner_wa_notification(cfg: dict, message: str):
+    owner_number = cfg.get("ownerWhatsappNumber", "").strip()
+    if not owner_number or not cfg.get("ownerNotifyEnabled"):
         return
+    waha_url = cfg.get("wahaUrl", "").rstrip("/")
+    waha_session = cfg.get("wahaSession", "default") or "default"
+    waha_api_key = cfg.get("wahaApiKey", "")
+    if not waha_url:
+        return
+    # Normalise: strip leading +, append @c.us
+    number = owner_number.lstrip("+").replace(" ", "")
+    owner_chat_id = f"{number}@c.us"
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            await client.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-            )
+        await send_waha_text(waha_url, waha_session, waha_api_key, owner_chat_id, message)
     except Exception:
         pass
 
@@ -364,7 +369,7 @@ async def seed_defaults():
             ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
             ("ruleAiEnabled", False), ("isBotActive", False), ("aiEnabled", True),
             ("messageRetentionDays", 90), ("timezone", "WIB"),
-            ("telegramBotToken", ""), ("telegramChatId", ""), ("telegramNotifyEnabled", False),
+            ("ownerWhatsappNumber", ""), ("ownerNotifyEnabled", False),
             ("autoLabels", "[]"), ("workingHoursSchedule", ""),
         ]
         for key, default_val in required_defaults:
@@ -2042,12 +2047,11 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                     await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI tidak dikonfigurasi — fallback ke Knowledge Base langsung", uid)
                 else:
                     await add_log("AI_ERROR", f"[{user['username']}] ✗ AI tidak dikonfigurasi dan tidak ada rule/KB — tidak ada balasan", uid)
-                    # Feature 6: Telegram notif
-                    if cfg.get("telegramNotifyEnabled") and cfg.get("telegramBotToken"):
-                        await send_telegram_alert(
-                            cfg["telegramBotToken"], cfg.get("telegramChatId",""),
-                            f"⚠️ <b>Pesan tidak terjawab</b>\nDari: {contact_doc.get('name','?')} ({chat_id})\nPesan: {body[:200]}"
-                        )
+                    # Feature 6: WA owner notif
+                    await send_owner_wa_notification(
+                        cfg,
+                        f"⚠️ Pesan tidak terjawab\nDari: {contact_doc.get('name','?')} ({chat_id})\nPesan: {body[:200]}"
+                    )
                     return {"success": True, "processed": False, "reason": "ai_not_configured_no_fallback"}
             else:
                 # Feature 2: Summarization — ambil ringkasan percakapan lama jika ada
@@ -2122,12 +2126,11 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
 
     if not reply_text:
         await add_log("AI_ERROR", f"[{user['username']}] Tidak ada balasan yang dihasilkan untuk {chat_id}", uid)
-        # Feature 6: Telegram notification when no answer
-        if cfg.get("telegramNotifyEnabled") and cfg.get("telegramBotToken"):
-            await send_telegram_alert(
-                cfg["telegramBotToken"], cfg.get("telegramChatId",""),
-                f"⚠️ <b>Pesan tidak terjawab</b>\nDari: {contact_doc.get('name','?')} ({chat_id})\nPesan: {body[:200]}"
-            )
+        # Feature 6: WA owner notif when no answer
+        await send_owner_wa_notification(
+            cfg,
+            f"⚠️ Pesan tidak terjawab\nDari: {contact_doc.get('name','?')} ({chat_id})\nPesan: {body[:200]}"
+        )
         return {"success": True, "processed": False, "reason": "no_reply_generated"}
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
