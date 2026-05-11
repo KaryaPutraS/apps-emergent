@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
   Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
-  UserCog, ShieldCheck, UserCircle, BookMarked
+  UserCog, ShieldCheck, UserCircle, BookMarked, Palette
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
@@ -26,9 +26,11 @@ import TestCenter from '../pages/TestCenter';
 import Logs from '../pages/Logs';
 import UserManagement from '../pages/UserManagement';
 import Documentation from '../pages/Documentation';
+import Branding from '../pages/Branding';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
+  { id: 'branding', label: 'Branding', icon: Palette, group: 'main' },
   { id: 'docs', label: 'Dokumentasi', icon: BookMarked, group: 'main' },
 ];
 
@@ -74,6 +76,7 @@ const pageComponents = {
   'test-center': TestCenter,
   'logs': Logs,
   'user-management': UserManagement,
+  'branding': Branding,
   'reset-data': ResetData,
   'settings': SettingsPage,
   'docs': Documentation,
@@ -92,11 +95,12 @@ const Layout = () => {
   const navItems = isSuperAdmin ? superadminNavItems : userNavItems;
   const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
 
-  // Superadmin can access user-management and docs; user never accesses user-management
-  const superadminAllowed = ['user-management', 'docs'];
+  // Superadmin can access user-management, branding, and docs; user never accesses these
+  const superadminAllowed = ['user-management', 'branding', 'docs'];
+  const userBlocked = ['user-management', 'branding'];
   const safeTab = isSuperAdmin
     ? (superadminAllowed.includes(activeTab) ? activeTab : 'user-management')
-    : (activeTab === 'user-management' ? 'dashboard' : activeTab);
+    : (userBlocked.includes(activeTab) ? 'dashboard' : activeTab);
   const ActivePage = pageComponents[safeTab] || Dashboard;
 
   const allNavItems = [...superadminNavItems, ...userNavItems];

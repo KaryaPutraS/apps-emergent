@@ -3,7 +3,8 @@ import './App.css';
 import { Toaster } from './components/ui/sonner';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
-import { login as apiLogin, logout as apiLogout, checkSession, getToken, clearToken } from './api/apiClient';
+import { login as apiLogin, logout as apiLogout, checkSession, getToken, clearToken, getBranding } from './api/apiClient';
+import { applyBrandingToDocument } from './pages/Branding';
 
 export const AppContext = createContext();
 
@@ -15,6 +16,13 @@ function App() {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [checking, setChecking] = useState(true);
+
+  // Apply global branding (favicon + title) on app load
+  useEffect(() => {
+    getBranding()
+      .then((data) => applyBrandingToDocument(data))
+      .catch(() => { /* ignore — keep default */ });
+  }, []);
 
   // Check existing session on mount
   useEffect(() => {

@@ -438,6 +438,20 @@ export const aiSetupChat = async (message, history = []) => {
 };
 
 // ============================================================
+// BRANDING (global)
+// ============================================================
+
+export const getBranding = async () => {
+  const { data } = await apiClient.get('/branding');
+  return data;
+};
+
+export const updateBranding = async (payload) => {
+  const { data } = await apiClient.put('/branding', payload);
+  return data;
+};
+
+// ============================================================
 // EXPORT
 // ============================================================
 

@@ -1830,6 +1830,48 @@ async def upload_doc_image(req: ImageUpload, admin: Dict = Depends(require_super
     return {"success": True, "imageId": image_id, "dataUrl": req.dataUrl}
 
 # ============================================================
+# BRANDING (global, superadmin-only edit)
+# ============================================================
+
+class BrandingUpdate(BaseModel):
+    siteName: Optional[str] = None
+    faviconDataUrl: Optional[str] = None  # data:image/... base64
+
+@api_router.get("/branding")
+async def get_branding():
+    """Public: returns global site name and favicon for browser tab."""
+    name_doc = await db.config.find_one({"key": "siteName", "userId": ""})
+    fav_doc = await db.config.find_one({"key": "faviconDataUrl", "userId": ""})
+    return {
+        "siteName": (name_doc or {}).get("value") or "adminpintar.id",
+        "faviconDataUrl": (fav_doc or {}).get("value") or "",
+    }
+
+@api_router.put("/branding")
+async def update_branding(req: BrandingUpdate, admin: Dict = Depends(require_superadmin)):
+    now = datetime.utcnow()
+    if req.siteName is not None:
+        name = req.siteName.strip()[:60] or "adminpintar.id"
+        await db.config.update_one(
+            {"key": "siteName", "userId": ""},
+            {"$set": {"key": "siteName", "userId": "", "value": name, "updated_at": now}},
+            upsert=True,
+        )
+    if req.faviconDataUrl is not None:
+        fav = req.faviconDataUrl
+        if fav and not fav.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="Favicon harus berupa data URL gambar (data:image/...).")
+        if len(fav) > 1 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Ukuran favicon maksimal 1MB.")
+        await db.config.update_one(
+            {"key": "faviconDataUrl", "userId": ""},
+            {"$set": {"key": "faviconDataUrl", "userId": "", "value": fav, "updated_at": now}},
+            upsert=True,
+        )
+    await add_log("BRANDING_UPDATE", f"[{admin['username']}] Branding global diperbarui")
+    return await get_branding()
+
+# ============================================================
 # WEBHOOK TOKEN & USER ACTIVITY
 # ============================================================
 
