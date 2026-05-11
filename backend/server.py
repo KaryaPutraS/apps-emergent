@@ -289,7 +289,7 @@ async def seed_defaults():
             ("aiApiKey", ""), ("ollamaUrl", ""), ("systemPrompt", ""),
             ("businessInfo", ""), ("aiTemperature", 0.7), ("aiMaxTokens", 500),
             ("memoryLimit", 10), ("memoryTimeoutMinutes", 30),
-            ("ruleAiEnabled", False), ("isBotActive", False),
+            ("ruleAiEnabled", False), ("isBotActive", False), ("aiEnabled", True),
             ("messageRetentionDays", 90), ("timezone", "WIB"),
         ]
         for key, default_val in required_defaults:
@@ -1805,7 +1805,8 @@ async def receive_webhook(token: str, request: Request):
     provider = cfg.get("aiProvider", "").upper()
     model = cfg.get("aiModel", "")
     ai_api_key = cfg.get("aiApiKey", "")
-    ai_ready = bool(provider and (ai_api_key or provider == "OLLAMA"))
+    ai_enabled = cfg.get("aiEnabled", True)
+    ai_ready = bool(ai_enabled and provider and (ai_api_key or provider == "OLLAMA"))
 
     if not reply_text:
         # Mode LANGSUNG: jawab dari KB tanpa AI, atau skip jika tidak ada konten

@@ -4,10 +4,11 @@ import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, st
 import {
   Copy, Save, Search, Wifi, Brain, Globe, QrCode,
   Smartphone, RefreshCw, Play, Square, CheckCircle2,
-  AlertCircle, Loader2, Eye, EyeOff, Unplug, Webhook, Zap, Link2
+  AlertCircle, Loader2, Eye, EyeOff, Unplug, Webhook, Zap, Link2, Power
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Switch } from '../components/ui/switch';
 import { toast } from 'sonner';
 
 const aiProviders = [
@@ -290,6 +291,7 @@ const Connections = () => {
   const [aiApiKey, setAiApiKey] = useState('');
   const [showAiKey, setShowAiKey] = useState(false);
   const [ollamaUrl, setOllamaUrl] = useState('');
+  const [aiEnabled, setAiEnabled] = useState(true);
   const [wahaConfigured, setWahaConfigured] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [backendUrl, setBackendUrl] = useState('');
@@ -315,6 +317,7 @@ const Connections = () => {
       setWahaApiKey(data.wahaApiKey || '');
       setAiApiKey(data.aiApiKey || '');
       setOllamaUrl(data.ollamaUrl || '');
+      setAiEnabled(data.aiEnabled !== false);
       setBackendUrl(data.backendUrl || '');
       setWahaConfigured(!!data.wahaUrl);
       setLoading(false);
@@ -383,12 +386,22 @@ const Connections = () => {
   };
 
   const handleSaveAI = async () => {
-    const updates = { aiProvider: provider, aiModel: model, aiApiKey, ollamaUrl };
+    const updates = { aiProvider: provider, aiModel: model, aiApiKey, ollamaUrl, aiEnabled };
     try {
       await updateConfig(updates);
-      toast.success('Konfigurasi AI tersimpan!');
+      toast.success(aiEnabled ? 'Konfigurasi AI tersimpan & aktif!' : 'Konfigurasi AI tersimpan (AI dinonaktifkan).');
     } catch {
       toast.error('Gagal menyimpan konfigurasi AI.');
+    }
+  };
+
+  const handleToggleAI = async (val) => {
+    setAiEnabled(val);
+    try {
+      await updateConfig({ aiEnabled: val });
+      toast.success(val ? 'AI diaktifkan' : 'AI dinonaktifkan — API key tetap tersimpan');
+    } catch {
+      toast.error('Gagal mengubah status AI.');
     }
   };
 
@@ -602,62 +615,89 @@ const Connections = () => {
       </div>
 
       {/* ── AI Provider ── */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
-          <Brain className="w-4 h-4 text-emerald-500" /> AI Provider
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Provider</label>
-            <select
-              value={provider}
-              onChange={(e) => { setProvider(e.target.value); setModel(aiModelOptions[e.target.value]?.[0] || ''); }}
-              className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm"
-            >
-              {aiProviders.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </select>
+      <div className={`bg-white rounded-xl border overflow-hidden transition-colors ${aiEnabled ? 'border-slate-200' : 'border-slate-200'}`}>
+        {/* Header dengan toggle */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${aiEnabled ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+              <Brain className={`w-4 h-4 ${aiEnabled ? 'text-emerald-600' : 'text-slate-400'}`} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-900 text-sm">AI Provider</h3>
+              <p className="text-xs text-slate-500">Konfigurasi model AI untuk menjawab pesan</p>
+            </div>
           </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Model</label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm"
-            >
-              {models.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
+          <div className="flex items-center gap-2.5">
+            <span className={`text-xs font-medium ${aiEnabled ? 'text-emerald-600' : 'text-slate-400'}`}>
+              {aiEnabled ? 'Aktif' : 'Nonaktif'}
+            </span>
+            <Switch checked={aiEnabled} onCheckedChange={handleToggleAI} />
           </div>
         </div>
-        {provider === 'OLLAMA' && (
-          <div className="mt-4">
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Ollama URL</label>
-            <Input value={ollamaUrl} onChange={(e) => setOllamaUrl(e.target.value)} placeholder="http://IP-SERVER:11434" />
+
+        {/* Banner saat AI off */}
+        {!aiEnabled && (
+          <div className="flex items-center gap-3 px-6 py-3 bg-amber-50 border-b border-amber-100">
+            <Power className="w-4 h-4 text-amber-500 flex-shrink-0" />
+            <p className="text-sm text-amber-700">
+              AI sedang <strong>dinonaktifkan</strong> — bot akan menjawab dari Rules & Knowledge Base saja. API key tetap tersimpan.
+            </p>
           </div>
         )}
-        <div className="mt-4">
-          <label className="text-sm font-medium text-slate-700 block mb-1.5">API Key</label>
-          <div className="relative">
-            <Input
-              type={showAiKey ? 'text' : 'password'}
-              value={aiApiKey}
-              onChange={(e) => setAiApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="pr-10"
-            />
-            <button
-              type="button"
-              onClick={() => setShowAiKey(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              {showAiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
+
+        {/* Form — selalu tampil tapi dim saat off */}
+        <div className={`px-6 py-5 space-y-4 ${!aiEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1.5">Provider</label>
+              <select
+                value={provider}
+                onChange={(e) => { setProvider(e.target.value); setModel(aiModelOptions[e.target.value]?.[0] || ''); }}
+                className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm"
+              >
+                {aiProviders.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1.5">Model</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm"
+              >
+                {models.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            API Key dari provider AI Anda
-            {aiApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
-          </p>
-        </div>
-        <div className="flex gap-2 mt-4">
+          {provider === 'OLLAMA' && (
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1.5">Ollama URL</label>
+              <Input value={ollamaUrl} onChange={(e) => setOllamaUrl(e.target.value)} placeholder="http://IP-SERVER:11434" />
+            </div>
+          )}
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">API Key</label>
+            <div className="relative">
+              <Input
+                type={showAiKey ? 'text' : 'password'}
+                value={aiApiKey}
+                onChange={(e) => setAiApiKey(e.target.value)}
+                placeholder="sk-..."
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowAiKey(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showAiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              API Key dari provider AI Anda
+              {aiApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
+            </p>
+          </div>
           <Button onClick={handleSaveAI} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
             <Save className="w-4 h-4" /> Simpan
           </Button>
