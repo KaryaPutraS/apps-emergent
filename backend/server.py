@@ -862,7 +862,10 @@ async def get_dashboard_stats(current_user: Dict = Depends(get_current_user)):
 
     pipeline = [
         {"$match": {"userId": uid}},
-        {"$group": {"_id": None, "totalTokens": {"$sum": "$tokensUsed"}, "aiCalls": {"$sum": {"$cond": [{"$gt": ["$tokensUsed", 0]}, 1, 0]}}}}
+        {"$group": {"_id": None,
+            "totalTokens": {"$sum": "$tokensUsed"},
+            "aiCalls": {"$sum": {"$cond": [{"$in": ["$responseType", ["ai", "combo"]]}, 1, 0]}}
+        }}
     ]
     agg = await db.messages.aggregate(pipeline).to_list(1)
     tokens_used = agg[0]["totalTokens"] if agg else 0
@@ -1744,10 +1747,13 @@ async def receive_webhook(token: str, request: Request):
     # ── Step 1: Rules engine ──────────────────────────────────
     reply_text = None
     response_type = "ai"
+    tokens_used = 0
     msg_lower = body.lower()
+    default_mode = cfg.get("defaultRuleResponseMode", "ai_context")  # direct / ai_polish / ai_context
 
     rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
-    rule_matched = False
+    rule_text = None   # teks dari rule yang cocok (sebelum diputuskan modenya)
+    rule_matched_name = None
     for rule in rules:
         trigger = rule.get("triggerValue", "").strip()
         trigger_type = rule.get("triggerType", "contains")
@@ -1763,25 +1769,25 @@ async def receive_webhook(token: str, request: Request):
             matched = any(msg_lower.startswith(kw) for kw in keywords)
 
         if matched:
-            rule_matched = True
-            mode = rule.get("responseMode", "direct")
-            if mode == "direct":
-                reply_text = rule.get("response", "")
+            rule_text = rule.get("response", "")
+            rule_matched_name = rule.get("name", "?")
+            rule_mode = rule.get("responseMode", default_mode)
+            if rule_mode == "direct":
+                reply_text = rule_text
                 response_type = "rule"
-                await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule['name']}' → mode=LANGSUNG, balasan dari rule", uid)
-                break
+                await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule_matched_name}' → mode=LANGSUNG, balasan dari rule", uid)
             else:
-                await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule['name']}' → mode={mode}, lanjut ke AI", uid)
-                break
+                await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule_matched_name}' → mode={rule_mode}, lanjut ke AI", uid)
+            break
 
-    if not rule_matched:
+    if rule_text is None:
         await add_log("RULE_HIT", f"[{user['username']}] ❌ Tidak ada rule yang cocok dari {len(rules)} rule aktif — lanjut cek Knowledge Base", uid)
 
     # ── Step 2: Knowledge base context ───────────────────────
     knowledge_context = ""
+    matched_items = []
     if not reply_text:
         items = await db.knowledge.find({"userId": uid, "isActive": True}, {"_id": 0}).to_list(100)
-        matched_items = []
         for item in items:
             keywords = [k.strip().lower() for k in item.get("keyword", "").split("|") if k.strip()]
             if any(kw in msg_lower for kw in keywords):
@@ -1793,56 +1799,98 @@ async def receive_webhook(token: str, request: Request):
             kb_names = ", ".join(f"'{i.get('category','?')}'" for i in matched_items[:3])
             await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ✅ Knowledge Base COCOK: {kb_names} — konteks dikirim ke AI", uid)
         else:
-            await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ❌ Tidak ada Knowledge Base yang cocok dari {len(items)} item aktif — AI jawab tanpa konteks KB", uid)
+            await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ❌ Tidak ada Knowledge Base yang cocok dari {len(items)} item aktif", uid)
 
-    # ── Step 3: AI call ──────────────────────────────────────
-    if not reply_text:
-        provider = cfg.get("aiProvider", "").upper()
-        model = cfg.get("aiModel", "")
-        ai_api_key = cfg.get("aiApiKey", "")
-        system_prompt = cfg.get("systemPrompt", "") or "Kamu adalah asisten virtual yang membantu dan ramah."
-        business_info = cfg.get("businessInfo", "")
-        temperature = float(cfg.get("aiTemperature") or 0.7)
-        max_tokens = int(cfg.get("aiMaxTokens") or 500)
-        memory_limit = int(cfg.get("memoryLimit") or 10)
-
-        kb_info = f" + KB ({len(matched_items)} item)" if knowledge_context else " (tanpa KB)"
-        await add_log("AI_CALL", f"[{user['username']}] 🤖 AI dipanggil: {provider}/{model}{kb_info} | apiKey={'✓' if ai_api_key else '✗ KOSONG'}", uid)
-
-        if not provider:
-            await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Buka menu Koneksi → AI Provider → Simpan.", uid)
-            reply_text = "Maaf, bot belum dikonfigurasi dengan benar (provider kosong)."
-        elif not ai_api_key and provider != "OLLAMA":
-            await add_log("AI_ERROR", f"[{user['username']}] AI API Key kosong untuk provider {provider}. Buka menu Koneksi → simpan ulang.", uid)
-            reply_text = "Maaf, bot belum dikonfigurasi dengan benar (API key kosong)."
-
-        if business_info:
-            system_prompt += f"\n\nInformasi bisnis:\n{business_info}"
-        if knowledge_context:
-            system_prompt += f"\n\nGunakan informasi berikut untuk menjawab:\n{knowledge_context}"
-
-        # Get conversation history for memory (per-user + per-contact)
-        history_docs = await db.messages.find(
-            {"chatId": chat_id, "userId": uid, "direction": {"$in": ["incoming", "outgoing"]}}
-        ).sort("timestamp", -1).to_list(memory_limit * 2)
-        history_docs.reverse()
-
-        messages = []
-        for h in history_docs[:-1]:
-            role = "user" if h["direction"] == "incoming" else "assistant"
-            messages.append({"role": role, "content": h["message"]})
-        messages.append({"role": "user", "content": body})
-
-        if not reply_text:
-            await add_log("AI_CALL", f"[{user['username']}] ⏳ Mengirim ke {provider}/{model} ({len(messages)} pesan riwayat)...", uid)
-            reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
-            if reply_text:
-                await add_log("AI_CALL", f"[{user['username']}] ✅ AI menjawab ({len(reply_text)} karakter)", uid)
-        response_type = "ai"
+    # ── Step 3: AI call (atau fallback langsung jika mode=direct / AI tidak dikonfigurasi) ──
+    provider = cfg.get("aiProvider", "").upper()
+    model = cfg.get("aiModel", "")
+    ai_api_key = cfg.get("aiApiKey", "")
+    ai_ready = bool(provider and (ai_api_key or provider == "OLLAMA"))
 
     if not reply_text:
-        await add_log("AI_ERROR", f"[{user['username']}] AI tidak menghasilkan balasan untuk {chat_id}", uid)
-        reply_text = "Maaf, saya tidak dapat memproses pesan Anda saat ini."
+        # Mode LANGSUNG: jawab dari KB tanpa AI, atau skip jika tidak ada konten
+        if default_mode == "direct":
+            if knowledge_context:
+                reply_text = "\n\n".join(f"{i['content']}" for i in matched_items[:3])
+                response_type = "rule"
+                await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] 📖 Jawaban langsung dari Knowledge Base (mode=direct)", uid)
+            else:
+                await add_log("RULE_HIT", f"[{user['username']}] ⚠️ Mode LANGSUNG: tidak ada rule/KB yang cocok, tidak ada balasan", uid)
+                return {"success": True, "processed": False, "reason": "no_match_direct_mode"}
+
+        # Mode AI / AI_POLISH: panggil AI
+        else:
+            system_prompt = cfg.get("systemPrompt", "") or "Kamu adalah asisten virtual yang membantu dan ramah."
+            business_info = cfg.get("businessInfo", "")
+            temperature = float(cfg.get("aiTemperature") or 0.7)
+            max_tokens = int(cfg.get("aiMaxTokens") or 500)
+            memory_limit = int(cfg.get("memoryLimit") or 10)
+
+            if business_info:
+                system_prompt += f"\n\nInformasi bisnis:\n{business_info}"
+            if knowledge_context:
+                system_prompt += f"\n\nGunakan informasi berikut untuk menjawab:\n{knowledge_context}"
+            if rule_text:
+                system_prompt += f"\n\nJawaban referensi (poles menjadi lebih natural):\n{rule_text}"
+
+            if not ai_ready:
+                # AI tidak terkonfigurasi — fallback ke rule/KB langsung
+                if rule_text:
+                    reply_text = rule_text
+                    response_type = "rule"
+                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI tidak dikonfigurasi — fallback ke teks rule langsung", uid)
+                elif knowledge_context:
+                    reply_text = "\n\n".join(f"{i['content']}" for i in matched_items[:3])
+                    response_type = "rule"
+                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI tidak dikonfigurasi — fallback ke Knowledge Base langsung", uid)
+                else:
+                    await add_log("AI_ERROR", f"[{user['username']}] ✗ AI tidak dikonfigurasi dan tidak ada rule/KB — tidak ada balasan", uid)
+                    return {"success": True, "processed": False, "reason": "ai_not_configured_no_fallback"}
+            else:
+                history_docs = await db.messages.find(
+                    {"chatId": chat_id, "userId": uid, "direction": {"$in": ["incoming", "outgoing"]}}
+                ).sort("timestamp", -1).to_list(memory_limit * 2)
+                history_docs.reverse()
+
+                ai_messages = []
+                for h in history_docs[:-1]:
+                    role = "user" if h["direction"] == "incoming" else "assistant"
+                    ai_messages.append({"role": role, "content": h["message"]})
+                ai_messages.append({"role": "user", "content": body})
+
+                kb_info = f" + KB ({len(matched_items)} item)" if knowledge_context else ""
+                rule_info = f" + Rule" if rule_text else ""
+                await add_log("AI_CALL", f"[{user['username']}] 🤖 AI dipanggil: {provider}/{model}{kb_info}{rule_info} | {len(ai_messages)} pesan riwayat", uid)
+
+                ai_reply, tokens_used = await call_ai(provider, model, ai_api_key, system_prompt, ai_messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
+                if ai_reply:
+                    reply_text = ai_reply
+                    response_type = "ai"
+                    await add_log("AI_CALL", f"[{user['username']}] ✅ AI menjawab ({len(ai_reply)} karakter, {tokens_used} token)", uid)
+                elif rule_text:
+                    reply_text = rule_text
+                    response_type = "rule"
+                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI gagal — fallback ke teks rule", uid)
+                elif knowledge_context:
+                    reply_text = "\n\n".join(f"{i['content']}" for i in matched_items[:3])
+                    response_type = "rule"
+                    await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI gagal — fallback ke Knowledge Base", uid)
+
+    # Mode ai_polish: rule teks sudah di-set, tapi perlu dipoles AI
+    if reply_text and response_type == "rule" and rule_text and default_mode == "ai_polish" and ai_ready and reply_text == rule_text:
+        system_prompt = (cfg.get("systemPrompt", "") or "Kamu adalah asisten virtual yang membantu dan ramah.")
+        polish_messages = [{"role": "user", "content": f"Poles kalimat ini agar lebih natural dan ramah, jangan ubah informasinya:\n\n{rule_text}"}]
+        polished, t = await call_ai(provider, model, ai_api_key, system_prompt, polish_messages,
+                                     float(cfg.get("aiTemperature") or 0.7), int(cfg.get("aiMaxTokens") or 500), cfg.get("ollamaUrl", ""))
+        if polished:
+            reply_text = polished
+            tokens_used = t
+            response_type = "combo"
+            await add_log("AI_CALL", f"[{user['username']}] ✨ Rule dipoles AI ({tokens_used} token) → combo", uid)
+
+    if not reply_text:
+        await add_log("AI_ERROR", f"[{user['username']}] Tidak ada balasan yang dihasilkan untuk {chat_id}", uid)
+        return {"success": True, "processed": False, "reason": "no_reply_generated"}
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
     if waha_url:
@@ -1850,7 +1898,7 @@ async def receive_webhook(token: str, request: Request):
     else:
         await add_log("WAHA_ERROR", f"[{user['username']}] WAHA URL kosong, balasan tidak terkirim!", uid)
 
-    # Store outgoing message
+    # Store outgoing message with actual token count
     await db.messages.insert_one({
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         "chatId": chat_id,
@@ -1858,7 +1906,7 @@ async def receive_webhook(token: str, request: Request):
         "direction": "outgoing",
         "message": reply_text[:500],
         "responseType": response_type,
-        "tokensUsed": 0,
+        "tokensUsed": tokens_used,
     })
 
     await add_log("MESSAGE_OUT", f"[{user['username']}] Balas ke {chat_id}: [{response_type}] '{reply_text[:80]}'", uid)
@@ -1891,7 +1939,8 @@ async def send_waha_text(waha_url: str, session: str, api_key: str, chat_id: str
 
 async def call_ai(provider: str, model: str, api_key: str, system_prompt: str,
                   messages: list, temperature: float = 0.7, max_tokens: int = 500,
-                  ollama_url: str = "") -> str:
+                  ollama_url: str = "") -> tuple:
+    """Returns (reply_text: str, tokens_used: int)"""
     try:
         if provider == "GEMINI":
             return await _call_gemini(model or "gemini-2.0-flash", api_key, system_prompt, messages, temperature, max_tokens)
@@ -1909,14 +1958,14 @@ async def call_ai(provider: str, model: str, api_key: str, system_prompt: str,
             return await _call_openai_compat(f"{ollama_url.rstrip('/')}/v1", model, "", system_prompt, messages, temperature, max_tokens)
         else:
             await add_log("AI_ERROR", f"Provider tidak dikenal: {provider}")
-            return ""
+            return ("", 0)
     except Exception as e:
         await add_log("AI_ERROR", f"AI call error ({provider}): {str(e)[:200]}")
-        return ""
+        return ("", 0)
 
 
 async def _call_openai_compat(base_url: str, model: str, api_key: str, system_prompt: str,
-                               messages: list, temperature: float, max_tokens: int) -> str:
+                               messages: list, temperature: float, max_tokens: int) -> tuple:
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -1930,11 +1979,13 @@ async def _call_openai_compat(base_url: str, model: str, api_key: str, system_pr
         r = await client.post(f"{base_url}/chat/completions", json=body, headers=headers)
         r.raise_for_status()
         data = r.json()
-        return data["choices"][0]["message"]["content"].strip()
+        text = data["choices"][0]["message"]["content"].strip()
+        tokens = data.get("usage", {}).get("total_tokens", 0)
+        return (text, tokens)
 
 
 async def _call_gemini(model: str, api_key: str, system_prompt: str,
-                       messages: list, temperature: float, max_tokens: int) -> str:
+                       messages: list, temperature: float, max_tokens: int) -> tuple:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     contents = []
     for m in messages:
@@ -1945,17 +1996,18 @@ async def _call_gemini(model: str, api_key: str, system_prompt: str,
         "contents": contents,
         "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
     }
-    # Send key in header, not URL query param (prevents leaking in logs)
     headers = {"x-goog-api-key": api_key}
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(url, json=body, headers=headers)
         r.raise_for_status()
         data = r.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        tokens = data.get("usageMetadata", {}).get("totalTokenCount", 0)
+        return (text, tokens)
 
 
 async def _call_anthropic(model: str, api_key: str, system_prompt: str,
-                           messages: list, max_tokens: int) -> str:
+                           messages: list, max_tokens: int) -> tuple:
     headers = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
@@ -1971,7 +2023,10 @@ async def _call_anthropic(model: str, api_key: str, system_prompt: str,
         r = await client.post("https://api.anthropic.com/v1/messages", json=body, headers=headers)
         r.raise_for_status()
         data = r.json()
-        return data["content"][0]["text"].strip()
+        text = data["content"][0]["text"].strip()
+        usage = data.get("usage", {})
+        tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        return (text, tokens)
 
 # ============================================================
 # WAHA PROXY
