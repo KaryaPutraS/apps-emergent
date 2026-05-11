@@ -88,9 +88,11 @@ const roleBadge = {
 };
 
 const Layout = () => {
-  const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen, logout, currentUser } = useApp();
+  const { activeTab, setActiveTab, sidebarOpen, setSidebarOpen, logout, currentUser, branding } = useApp();
   const role = currentUser?.role || 'user';
   const isSuperAdmin = role === 'superadmin';
+  const siteName = branding?.siteName || 'adminpintar.id';
+  const logoDataUrl = branding?.logoDataUrl || '';
 
   const navItems = isSuperAdmin ? superadminNavItems : userNavItems;
   const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
@@ -126,11 +128,15 @@ const Layout = () => {
         >
           {/* Logo area */}
           <div className="flex items-center h-16 px-4 border-b border-white/10 flex-shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
-              <Bot className="w-5 h-5 text-white" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20 overflow-hidden">
+              {logoDataUrl ? (
+                <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain" />
+              ) : (
+                <Bot className="w-5 h-5 text-white" />
+              )}
             </div>
             <div className={`ml-3 overflow-hidden transition-all duration-300 ${sidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 lg:opacity-0 lg:w-0'}`}>
-              <h1 className="font-bold text-sm whitespace-nowrap">adminpintar.id</h1>
+              <h1 className="font-bold text-sm whitespace-nowrap">{siteName}</h1>
               <p className="text-[10px] text-slate-400 whitespace-nowrap">v1.2.0</p>
             </div>
             <button

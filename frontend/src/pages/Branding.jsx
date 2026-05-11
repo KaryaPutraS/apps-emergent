@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useApp } from '../App';
 import { getBranding, updateBranding } from '../api/apiClient';
-import { Palette, Save, Upload, Trash2, Loader2 } from 'lucide-react';
+import { Palette, Save, Upload, Trash2, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
@@ -19,52 +20,52 @@ const applyBrandingToDocument = ({ siteName, faviconDataUrl }) => {
 };
 
 const Branding = () => {
+  const { refreshBranding } = useApp();
   const [siteName, setSiteName] = useState('');
   const [faviconDataUrl, setFaviconDataUrl] = useState('');
+  const [logoDataUrl, setLogoDataUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef(null);
+  const faviconRef = useRef(null);
+  const logoRef = useRef(null);
 
   useEffect(() => {
     getBranding()
       .then((data) => {
         setSiteName(data.siteName || '');
         setFaviconDataUrl(data.faviconDataUrl || '');
+        setLogoDataUrl(data.logoDataUrl || '');
       })
       .finally(() => setLoading(false));
   }, []);
 
-  const handleFile = (e) => {
-    const file = e.target.files?.[0];
+  const readFile = (file, maxMB, setter) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       toast.error('File harus berupa gambar.');
       return;
     }
-    if (file.size > 1 * 1024 * 1024) {
-      toast.error('Ukuran maksimal 1MB.');
+    if (file.size > maxMB * 1024 * 1024) {
+      toast.error(`Ukuran maksimal ${maxMB}MB.`);
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setFaviconDataUrl(reader.result);
+    reader.onload = () => setter(reader.result);
     reader.readAsDataURL(file);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const result = await updateBranding({ siteName, faviconDataUrl });
+      const result = await updateBranding({ siteName, faviconDataUrl, logoDataUrl });
       applyBrandingToDocument(result);
+      if (refreshBranding) await refreshBranding();
       toast.success('Branding tersimpan dan diterapkan.');
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Gagal menyimpan.');
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleRemoveFavicon = () => {
-    setFaviconDataUrl('');
   };
 
   if (loading) {
@@ -106,7 +107,7 @@ const Branding = () => {
           </div>
 
           <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Favicon</label>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">Favicon (tab browser)</label>
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
                 {faviconDataUrl ? (
@@ -117,24 +118,57 @@ const Branding = () => {
               </div>
               <div className="flex flex-col gap-2">
                 <input
-                  ref={fileRef}
+                  ref={faviconRef}
                   type="file"
                   accept="image/*"
                   className="hidden"
-                  onChange={handleFile}
+                  onChange={(e) => readFile(e.target.files?.[0], 1, setFaviconDataUrl)}
                 />
-                <Button variant="outline" onClick={() => fileRef.current?.click()} className="gap-2">
-                  <Upload className="w-4 h-4" /> Pilih Gambar
+                <Button variant="outline" onClick={() => faviconRef.current?.click()} className="gap-2">
+                  <Upload className="w-4 h-4" /> Pilih Favicon
                 </Button>
                 {faviconDataUrl && (
-                  <Button variant="ghost" onClick={handleRemoveFavicon} className="gap-2 text-red-500 hover:text-red-600">
-                    <Trash2 className="w-4 h-4" /> Hapus Favicon
+                  <Button variant="ghost" onClick={() => setFaviconDataUrl('')} className="gap-2 text-red-500 hover:text-red-600">
+                    <Trash2 className="w-4 h-4" /> Hapus
                   </Button>
                 )}
               </div>
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              PNG/SVG/ICO. Ukuran maksimal 1MB. Disarankan kotak 64x64 atau 128x128.
+              PNG/SVG/ICO. Maks 1MB. Disarankan kotak 64x64 atau 128x128.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">Logo Dashboard & Login</label>
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-20 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center overflow-hidden">
+                {logoDataUrl ? (
+                  <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain p-2" />
+                ) : (
+                  <ImageIcon className="w-7 h-7 text-slate-400" />
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <input
+                  ref={logoRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => readFile(e.target.files?.[0], 2, setLogoDataUrl)}
+                />
+                <Button variant="outline" onClick={() => logoRef.current?.click()} className="gap-2">
+                  <Upload className="w-4 h-4" /> Pilih Logo
+                </Button>
+                {logoDataUrl && (
+                  <Button variant="ghost" onClick={() => setLogoDataUrl('')} className="gap-2 text-red-500 hover:text-red-600">
+                    <Trash2 className="w-4 h-4" /> Hapus
+                  </Button>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Logo tampil di sidebar dashboard (semua user) dan halaman login. PNG/SVG. Maks 2MB.
             </p>
           </div>
         </div>

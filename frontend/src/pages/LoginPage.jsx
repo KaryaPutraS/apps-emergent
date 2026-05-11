@@ -6,7 +6,9 @@ import { Lock, Eye, EyeOff, Bot, ShieldCheck, User } from 'lucide-react';
 import { toast } from 'sonner';
 
 const LoginPage = () => {
-  const { login } = useApp();
+  const { login, branding } = useApp();
+  const siteName = branding?.siteName || 'adminpintar.id';
+  const logoDataUrl = branding?.logoDataUrl || '';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -44,8 +46,12 @@ const LoginPage = () => {
         <div className="bg-white rounded-2xl shadow-2xl shadow-black/20 p-8 border border-slate-200/50">
           {/* Logo */}
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25">
-              <Bot className="w-8 h-8 text-white" />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 overflow-hidden">
+              {logoDataUrl ? (
+                <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain p-2" />
+              ) : (
+                <Bot className="w-8 h-8 text-white" />
+              )}
             </div>
           </div>
 
@@ -53,7 +59,7 @@ const LoginPage = () => {
           <div className="text-center mb-8">
             <h1 className="text-2xl font-bold text-slate-900">Masuk ke Dashboard</h1>
             <p className="text-slate-500 mt-2 text-sm leading-relaxed">
-              adminpintar.id — masukkan kredensial akun Anda.
+              {siteName} — masukkan kredensial akun Anda.
             </p>
           </div>
 
@@ -138,7 +144,7 @@ const LoginPage = () => {
         <div className="text-center mt-6">
           <p className="text-slate-500 text-xs flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5" />
-            Secured by adminpintar.id v1.2.0
+            Secured by {siteName} v1.2.0
           </p>
         </div>
       </div>

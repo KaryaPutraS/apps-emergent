@@ -1836,15 +1836,18 @@ async def upload_doc_image(req: ImageUpload, admin: Dict = Depends(require_super
 class BrandingUpdate(BaseModel):
     siteName: Optional[str] = None
     faviconDataUrl: Optional[str] = None  # data:image/... base64
+    logoDataUrl: Optional[str] = None  # data:image/... base64 — sidebar/login logo
 
 @api_router.get("/branding")
 async def get_branding():
-    """Public: returns global site name and favicon for browser tab."""
+    """Public: returns global site name, favicon, and dashboard logo."""
     name_doc = await db.config.find_one({"key": "siteName", "userId": ""})
     fav_doc = await db.config.find_one({"key": "faviconDataUrl", "userId": ""})
+    logo_doc = await db.config.find_one({"key": "logoDataUrl", "userId": ""})
     return {
         "siteName": (name_doc or {}).get("value") or "adminpintar.id",
         "faviconDataUrl": (fav_doc or {}).get("value") or "",
+        "logoDataUrl": (logo_doc or {}).get("value") or "",
     }
 
 @api_router.put("/branding")
@@ -1857,15 +1860,20 @@ async def update_branding(req: BrandingUpdate, admin: Dict = Depends(require_sup
             {"$set": {"key": "siteName", "userId": "", "value": name, "updated_at": now}},
             upsert=True,
         )
-    if req.faviconDataUrl is not None:
-        fav = req.faviconDataUrl
-        if fav and not fav.startswith("data:image/"):
-            raise HTTPException(status_code=400, detail="Favicon harus berupa data URL gambar (data:image/...).")
-        if len(fav) > 1 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Ukuran favicon maksimal 1MB.")
+    for field, key, max_bytes, label in (
+        ("faviconDataUrl", "faviconDataUrl", 1 * 1024 * 1024, "Favicon"),
+        ("logoDataUrl", "logoDataUrl", 2 * 1024 * 1024, "Logo"),
+    ):
+        val = getattr(req, field)
+        if val is None:
+            continue
+        if val and not val.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail=f"{label} harus berupa data URL gambar (data:image/...).")
+        if len(val) > max_bytes:
+            raise HTTPException(status_code=400, detail=f"Ukuran {label} maksimal {max_bytes // (1024*1024)}MB.")
         await db.config.update_one(
-            {"key": "faviconDataUrl", "userId": ""},
-            {"$set": {"key": "faviconDataUrl", "userId": "", "value": fav, "updated_at": now}},
+            {"key": key, "userId": ""},
+            {"$set": {"key": key, "userId": "", "value": val, "updated_at": now}},
             upsert=True,
         )
     await add_log("BRANDING_UPDATE", f"[{admin['username']}] Branding global diperbarui")

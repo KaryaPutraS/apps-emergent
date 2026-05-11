@@ -16,13 +16,20 @@ function App() {
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [checking, setChecking] = useState(true);
+  const [branding, setBranding] = useState({ siteName: 'adminpintar.id', faviconDataUrl: '', logoDataUrl: '' });
 
   // Apply global branding (favicon + title) on app load
-  useEffect(() => {
-    getBranding()
-      .then((data) => applyBrandingToDocument(data))
+  const refreshBranding = useCallback(() => {
+    return getBranding()
+      .then((data) => {
+        setBranding(data);
+        applyBrandingToDocument(data);
+        return data;
+      })
       .catch(() => { /* ignore — keep default */ });
   }, []);
+
+  useEffect(() => { refreshBranding(); }, [refreshBranding]);
 
   // Check existing session on mount
   useEffect(() => {
@@ -72,6 +79,8 @@ function App() {
     setSidebarOpen,
     login,
     logout,
+    branding,
+    refreshBranding,
   };
 
   if (checking) {
