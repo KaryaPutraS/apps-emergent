@@ -1747,6 +1747,7 @@ async def receive_webhook(token: str, request: Request):
     msg_lower = body.lower()
 
     rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    rule_matched = False
     for rule in rules:
         trigger = rule.get("triggerValue", "").strip()
         trigger_type = rule.get("triggerType", "contains")
@@ -1762,14 +1763,19 @@ async def receive_webhook(token: str, request: Request):
             matched = any(msg_lower.startswith(kw) for kw in keywords)
 
         if matched:
+            rule_matched = True
             mode = rule.get("responseMode", "direct")
             if mode == "direct":
                 reply_text = rule.get("response", "")
                 response_type = "rule"
-                await add_log("RULE_HIT", f"[{user['username']}] Rule '{rule['name']}' matched untuk {chat_id}", uid)
+                await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule['name']}' → mode=LANGSUNG, balasan dari rule", uid)
                 break
-            # mode == "ai" → fall through to AI with rule context
-            break
+            else:
+                await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule['name']}' → mode={mode}, lanjut ke AI", uid)
+                break
+
+    if not rule_matched:
+        await add_log("RULE_HIT", f"[{user['username']}] ❌ Tidak ada rule yang cocok dari {len(rules)} rule aktif — lanjut cek Knowledge Base", uid)
 
     # ── Step 2: Knowledge base context ───────────────────────
     knowledge_context = ""
@@ -1784,6 +1790,10 @@ async def receive_webhook(token: str, request: Request):
             knowledge_context = "\n".join(
                 f"[{i['category']}]: {i['content']}" for i in matched_items[:3]
             )
+            kb_names = ", ".join(f"'{i.get('category','?')}'" for i in matched_items[:3])
+            await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ✅ Knowledge Base COCOK: {kb_names} — konteks dikirim ke AI", uid)
+        else:
+            await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ❌ Tidak ada Knowledge Base yang cocok dari {len(items)} item aktif — AI jawab tanpa konteks KB", uid)
 
     # ── Step 3: AI call ──────────────────────────────────────
     if not reply_text:
@@ -1796,7 +1806,8 @@ async def receive_webhook(token: str, request: Request):
         max_tokens = int(cfg.get("aiMaxTokens") or 500)
         memory_limit = int(cfg.get("memoryLimit") or 10)
 
-        await add_log("AI_CALL", f"[{user['username']}] Config — provider={provider} model={model} apiKey={'set' if ai_api_key else 'KOSONG'}", uid)
+        kb_info = f" + KB ({len(matched_items)} item)" if knowledge_context else " (tanpa KB)"
+        await add_log("AI_CALL", f"[{user['username']}] 🤖 AI dipanggil: {provider}/{model}{kb_info} | apiKey={'✓' if ai_api_key else '✗ KOSONG'}", uid)
 
         if not provider:
             await add_log("AI_ERROR", f"[{user['username']}] AI Provider belum dikonfigurasi. Buka menu Koneksi → AI Provider → Simpan.", uid)
@@ -1823,8 +1834,10 @@ async def receive_webhook(token: str, request: Request):
         messages.append({"role": "user", "content": body})
 
         if not reply_text:
-            await add_log("AI_CALL", f"[{user['username']}] Memanggil AI {provider}/{model} untuk {chat_id}", uid)
+            await add_log("AI_CALL", f"[{user['username']}] ⏳ Mengirim ke {provider}/{model} ({len(messages)} pesan riwayat)...", uid)
             reply_text = await call_ai(provider, model, ai_api_key, system_prompt, messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
+            if reply_text:
+                await add_log("AI_CALL", f"[{user['username']}] ✅ AI menjawab ({len(reply_text)} karakter)", uid)
         response_type = "ai"
 
     if not reply_text:
