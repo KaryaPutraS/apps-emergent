@@ -1902,6 +1902,19 @@ async def receive_webhook(token: str, request: Request):
             # DuplicateKeyError = already processed
             return {"success": True, "processed": False, "reason": "duplicate"}
 
+    # Store raw payload for debug inspection (keep last 20, TTL-style trim)
+    if chat_id and "@lid" in chat_id:
+        try:
+            await db.debug_webhooks.insert_one({
+                "chat_id": chat_id, "ts": datetime.utcnow(),
+                "payload": payload, "msg_payload": msg_payload,
+            })
+            await db.debug_webhooks.delete_many({
+                "_id": {"$nin": [d["_id"] async for d in db.debug_webhooks.find({}, {"_id": 1}).sort("ts", -1).limit(20)]}
+            })
+        except Exception:
+            pass
+
     await add_log("WEBHOOK_IN", f"[{user['username']}] event={event} type={msg_type} fromMe={from_me} from={chat_id}")
 
     if not chat_id or not body:
@@ -2101,7 +2114,7 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                                 _raw = _rid.replace("@c.us", "").lstrip("+")
                         if _raw and _re.match(r'^\d{6,}$', str(_raw).lstrip("+")):
                             _resolved_phone = str(_raw).lstrip("+")
-                    await add_log("SYSTEM", f"[lid-B] status={_resp.status_code} → phone={_resolved_phone or 'none'}", uid)
+                    await add_log("SYSTEM", f"[lid-B] status={_resp.status_code} body={json.dumps(_cd)[:300]} → phone={_resolved_phone or 'none'}", uid)
             except Exception as _e:
                 await add_log("SYSTEM", f"[lid-B] error: {_e}", uid)
 
@@ -2751,6 +2764,39 @@ async def waha_debug(current_user: Dict = Depends(get_current_user)):
             except Exception as e:
                 results[f"{method} {path}"] = {"error": str(e)}
     return results
+
+@api_router.get("/waha/contact-debug/{chat_id:path}")
+async def waha_contact_debug(chat_id: str, current_user: Dict = Depends(get_current_user)):
+    """Debug: fetch raw WAHA response for a specific chatId (useful for @lid resolution)."""
+    from urllib.parse import quote as _uq
+    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    if not waha_url:
+        return {"error": "WAHA URL not configured"}
+    results = {}
+    encoded = _uq(chat_id, safe='')
+    endpoints = [
+        f"/api/{session}/contacts/{encoded}",
+        f"/api/{session}/chats/{encoded}",
+        f"/api/{session}/contacts?contactId={encoded}",
+    ]
+    async with httpx.AsyncClient(timeout=8) as client:
+        for ep in endpoints:
+            try:
+                r = await client.get(f"{waha_url}{ep}", headers=waha_headers(api_key))
+                try:
+                    body = r.json()
+                except Exception:
+                    body = r.text[:500]
+                results[ep] = {"status": r.status_code, "body": body}
+            except Exception as e:
+                results[ep] = {"error": str(e)}
+    # Also check last stored webhook payload for this chatId
+    last_wh = await db.debug_webhooks.find_one({"chat_id": chat_id}, sort=[("ts", -1)])
+    if last_wh:
+        last_wh.pop("_id", None)
+        results["last_webhook_payload"] = last_wh
+    return results
+
 
 @api_router.post("/waha/webhook")
 async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
