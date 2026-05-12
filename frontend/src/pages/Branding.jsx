@@ -1,23 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../App';
 import { getBranding, updateBranding } from '../api/apiClient';
+import { applyBrandingToDocument } from '../utils/branding';
 import { Palette, Save, Upload, Trash2, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
-
-const applyBrandingToDocument = ({ siteName, faviconDataUrl }) => {
-  if (siteName) document.title = siteName;
-  if (faviconDataUrl) {
-    let link = document.querySelector("link[rel~='icon']");
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'icon';
-      document.head.appendChild(link);
-    }
-    link.href = faviconDataUrl;
-  }
-};
 
 const Branding = () => {
   const { refreshBranding } = useApp();
@@ -184,5 +172,4 @@ const Branding = () => {
   );
 };
 
-export { applyBrandingToDocument };
 export default Branding;

@@ -4,7 +4,7 @@ import { Toaster } from './components/ui/sonner';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import { login as apiLogin, logout as apiLogout, checkSession, getToken, clearToken, getBranding } from './api/apiClient';
-import { applyBrandingToDocument } from './pages/Branding';
+import { applyBrandingToDocument } from './utils/branding';
 
 export const AppContext = createContext();
 
