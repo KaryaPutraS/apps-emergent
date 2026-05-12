@@ -285,7 +285,7 @@ const Connections = () => {
   const [provider, setProvider] = useState('GEMINI');
   const [model, setModel] = useState('gemini-2.0-flash');
   const [wahaUrl, setWahaUrl] = useState('');
-  const [wahaSession, setWahaSession] = useState('default');
+  const [wahaSession, setWahaSession] = useState('');
   const [wahaApiKey, setWahaApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [aiApiKey, setAiApiKey] = useState('');
@@ -322,12 +322,12 @@ const Connections = () => {
       setProvider(data.aiProvider || 'GEMINI');
       setModel(data.aiModel || 'gemini-2.0-flash');
       setWahaUrl(data.wahaUrl || '');
-      setWahaSession(data.wahaSession || 'default');
+      setWahaSession(data.wahaSession || '');
       setWahaApiKey(data.wahaApiKey || '');
       setAiApiKey(data.aiApiKey || '');
       setOllamaUrl(data.ollamaUrl || '');
       setAiEnabled(data.aiEnabled !== false);
-      setBackendUrl(data.backendUrl || '');
+      setBackendUrl(data.backendUrl || 'https://adminpintar.id');
       setWahaConfigured(!!data.wahaUrl);
       setLoading(false);
     }).catch((err) => {
@@ -337,8 +337,10 @@ const Connections = () => {
   }, []);
 
   const handleSaveWaha = async () => {
+    if (!wahaSession.trim()) { toast.error('Session Name wajib diisi!'); return; }
+    if (wahaSession.trim().toLowerCase() === 'default') { toast.error('Session Name "default" tidak diperbolehkan. Gunakan nama unik, misalnya nama bisnis Anda.'); return; }
     try {
-      await updateConfig({ wahaUrl, wahaSession, wahaApiKey, backendUrl });
+      await updateConfig({ wahaUrl, wahaSession: wahaSession.trim(), wahaApiKey, backendUrl });
       setWahaConfigured(!!wahaUrl);
       toast.success('Konfigurasi WAHA tersimpan!');
     } catch {
@@ -441,7 +443,11 @@ const Connections = () => {
           </div>
           <div>
             <label className="text-sm font-medium text-slate-700 block mb-1.5">Session Name</label>
-            <Input value={wahaSession} onChange={(e) => setWahaSession(e.target.value)} placeholder="default" />
+            <Input value={wahaSession} onChange={(e) => setWahaSession(e.target.value)} placeholder="contoh: tokosaya, bisnisabcd" className={wahaSession.trim().toLowerCase() === 'default' ? 'border-red-300 focus-visible:ring-red-400' : ''} />
+            {wahaSession.trim().toLowerCase() === 'default' && (
+              <p className="text-xs text-red-500 mt-1">Nama "default" tidak diperbolehkan — gunakan nama unik.</p>
+            )}
+            {!wahaSession.trim() && <p className="text-xs text-slate-400 mt-1">Wajib diisi · gunakan nama unik agar tidak bentrok dengan sesi lain</p>}
           </div>
         </div>
         <div className="mt-4">
