@@ -33,7 +33,14 @@ const SettingsPage = () => {
   const handleChangePassword = async () => {
     if (!oldPassword || !newPassword) { toast.error('Isi semua field password!'); return; }
     if (newPassword !== confirmPassword) { toast.error('Password baru tidak cocok!'); return; }
-    if (newPassword.length < 8) { toast.error('Password minimal 8 karakter!'); return; }
+    if (newPassword.length < 12) { toast.error('Password minimal 12 karakter!'); return; }
+    {
+      const hasLetter = /[A-Za-z]/.test(newPassword);
+      const hasDigit = /\d/.test(newPassword);
+      const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
+      const cats = [hasLetter, hasDigit, hasSpecial].filter(Boolean).length;
+      if (cats < 2) { toast.error('Gunakan minimal 2 dari: huruf, angka, simbol!'); return; }
+    }
     try {
       const res = await changePassword(oldPassword, newPassword, confirmPassword);
       toast.success(res.message || 'Password berhasil diganti!');
@@ -101,7 +108,7 @@ const SettingsPage = () => {
           <div>
             <label className="text-sm font-medium text-slate-700 block mb-1.5">Password Baru</label>
             <div className="relative">
-              <Input type={showNewPass ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Minimal 8 karakter" />
+              <Input type={showNewPass ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min. 12 karakter, huruf+angka/simbol" />
               <button onClick={() => setShowNewPass(!showNewPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
             </div>
           </div>

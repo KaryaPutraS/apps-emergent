@@ -29,8 +29,9 @@ const Branding = () => {
 
   const readFile = (file, maxMB, setter) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('File harus berupa gambar.');
+    const allowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+    if (!allowed.includes(file.type)) {
+      toast.error('Format gambar tidak didukung. Gunakan PNG, JPEG, WEBP, atau GIF.');
       return;
     }
     if (file.size > maxMB * 1024 * 1024) {
@@ -108,7 +109,7 @@ const Branding = () => {
                 <input
                   ref={faviconRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
                   className="hidden"
                   onChange={(e) => readFile(e.target.files?.[0], 1, setFaviconDataUrl)}
                 />
@@ -123,7 +124,7 @@ const Branding = () => {
               </div>
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              PNG/SVG/ICO. Maks 1MB. Disarankan kotak 64x64 atau 128x128.
+              PNG/JPEG/WEBP. Maks 1MB. Disarankan kotak 64x64 atau 128x128.
             </p>
           </div>
 
@@ -141,7 +142,7 @@ const Branding = () => {
                 <input
                   ref={logoRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
                   className="hidden"
                   onChange={(e) => readFile(e.target.files?.[0], 2, setLogoDataUrl)}
                 />
@@ -156,7 +157,7 @@ const Branding = () => {
               </div>
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              Logo tampil di sidebar dashboard (semua user) dan halaman login. PNG/SVG. Maks 2MB.
+              Logo tampil di sidebar dashboard (semua user) dan halaman login. PNG/JPEG/WEBP. Maks 2MB.
             </p>
           </div>
         </div>

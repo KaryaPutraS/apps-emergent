@@ -257,6 +257,45 @@ class ImageUpload(BaseModel):
 SESSION_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_PASSWORD = "admin123"
 
+# ── Password policy ──
+_COMMON_PASSWORDS = {
+    "password", "password1", "password123", "12345678", "123456789", "qwerty123",
+    "qwertyuiop", "admin123", "admin1234", "administrator", "letmein123",
+    "welcome1", "welcome123", "iloveyou1", "1q2w3e4r5t", "abc123456",
+    "passw0rd", "p@ssw0rd", "p@ssword", "changeme", "changeme123",
+}
+
+def validate_password_strength(password: str) -> None:
+    """Raise HTTPException 400 if password tidak memenuhi kebijakan keamanan."""
+    if not password or len(password) < 12:
+        raise HTTPException(status_code=400, detail="Password minimal 12 karakter.")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="Password maksimal 128 karakter.")
+    has_letter = any(c.isalpha() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    has_special = any(not c.isalnum() for c in password)
+    categories = sum([has_letter, has_digit, has_special])
+    if categories < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Password harus memiliki minimal 2 dari: huruf, angka, simbol."
+        )
+    if password.lower() in _COMMON_PASSWORDS:
+        raise HTTPException(status_code=400, detail="Password terlalu umum. Pilih yang lebih kuat.")
+
+# ── Data URL image validator ──
+_ALLOWED_IMAGE_MIMES = ("data:image/png;", "data:image/jpeg;", "data:image/jpg;", "data:image/webp;", "data:image/gif;")
+
+def validate_image_data_url(data_url: str, label: str = "Gambar") -> None:
+    """Tolak data URL non-gambar dan SVG (SVG bisa berisi script)."""
+    if not data_url:
+        return
+    lower = data_url.lower()
+    if lower.startswith("data:image/svg"):
+        raise HTTPException(status_code=400, detail=f"{label}: format SVG tidak diizinkan karena alasan keamanan.")
+    if not any(lower.startswith(prefix) for prefix in _ALLOWED_IMAGE_MIMES):
+        raise HTTPException(status_code=400, detail=f"{label}: hanya PNG, JPEG, WEBP, atau GIF yang diizinkan.")
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8')
 
@@ -330,9 +369,22 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict:
     session = await db.sessions.find_one({"token": token, "expires_at": {"$gt": datetime.utcnow()}})
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Silakan login ulang.")
+
+    user_id = session.get("userId", "admin")
+    # Validasi: user masih ada dan aktif. Bootstrap session (userId="admin")
+    # diizinkan agar tidak mengunci diri jika seed gagal.
+    if user_id and user_id != "admin":
+        user_doc = await db.users.find_one({"id": user_id}, {"isActive": 1, "role": 1})
+        if not user_doc:
+            await db.sessions.delete_one({"token": token})
+            raise HTTPException(status_code=401, detail="Akun tidak ditemukan. Silakan login ulang.")
+        if not user_doc.get("isActive", True):
+            await db.sessions.delete_many({"userId": user_id})
+            raise HTTPException(status_code=403, detail="Akun dinonaktifkan.")
+
     return {
         "token": token,
-        "userId": session.get("userId", "admin"),
+        "userId": user_id,
         "username": session.get("username", "admin"),
         "role": session.get("role", "admin"),
         "fullName": session.get("fullName", "Administrator"),
@@ -425,9 +477,13 @@ async def seed_defaults():
             except Exception:
                 pass
 
-        # Step 7: Unique index on processed_msgs for dedup atomicity
+        # Step 7: Unique index on processed_msgs for dedup atomicity + TTL 7 hari
         try:
             await db.processed_msgs.create_index("msgId", unique=True, sparse=True)
+        except Exception:
+            pass
+        try:
+            await db.processed_msgs.create_index("ts", expireAfterSeconds=7 * 86400)
         except Exception:
             pass
 
@@ -727,6 +783,22 @@ def _is_rate_limited(ip: str) -> bool:
 def _record_attempt(ip: str):
     _login_attempts.setdefault(ip, []).append(time.time())
 
+# Generic sliding-window rate limiter per (bucket_key, identifier).
+_rate_buckets: dict = {}  # (bucket, key) -> [timestamp, ...]
+
+def rate_limit(bucket: str, key: str, max_attempts: int, window_seconds: int) -> None:
+    """Raise 429 jika identifier sudah melebihi max_attempts dalam window_seconds."""
+    now = time.time()
+    bucket_key = (bucket, key or "unknown")
+    arr = [t for t in _rate_buckets.get(bucket_key, []) if now - t < window_seconds]
+    if len(arr) >= max_attempts:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Terlalu banyak request untuk {bucket}. Coba lagi dalam {window_seconds // 60} menit."
+        )
+    arr.append(now)
+    _rate_buckets[bucket_key] = arr
+
 @api_router.post("/auth/login", response_model=LoginResponse)
 async def login(req: LoginRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown"
@@ -776,11 +848,14 @@ async def login(req: LoginRequest, request: Request):
             }
         )
 
-    # Fall back to legacy admin password for backward compatibility
-    if username == "admin" and await verify_legacy_password(req.password):
+    # Fall back to legacy admin password ONLY for bootstrap when users collection
+    # is completely empty (defense-in-depth for fresh installs that hit a race
+    # condition with seed_defaults). Removed the unconditional backdoor.
+    user_count = await db.users.count_documents({})
+    if user_count == 0 and username == "admin" and req.password == DEFAULT_PASSWORD:
         token = await create_session(user_id="admin", username="admin", role="superadmin", full_name="Administrator")
-        await add_log("LOGIN_SUCCESS", "Admin login berhasil (legacy)")
-        await log_user_activity("admin", "admin", "LOGIN", "Login berhasil")
+        await add_log("LOGIN_SUCCESS", "Admin login berhasil (bootstrap)")
+        await log_user_activity("admin", "admin", "LOGIN", "Login berhasil (bootstrap)")
         return LoginResponse(
             success=True,
             token=token,
@@ -788,8 +863,9 @@ async def login(req: LoginRequest, request: Request):
             user={"userId": "admin", "username": "admin", "role": "superadmin", "fullName": "Administrator"}
         )
 
-    await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk: {username}")
-    await log_user_activity("unknown", username, "LOGIN_FAILED", "Password salah")
+    _record_attempt(client_ip)
+    await add_log("LOGIN_FAILED", f"Percobaan login gagal untuk: {username[:32]}")
+    await log_user_activity("unknown", username[:32], "LOGIN_FAILED", "Password salah")
     return LoginResponse(success=False, message="Username atau password salah.")
 
 @api_router.post("/auth/logout")
@@ -841,8 +917,7 @@ async def get_user_stats(admin: Dict = Depends(require_superadmin)):
 @api_router.post("/users")
 async def create_user(req: UserCreate, admin: Dict = Depends(require_superadmin)):
     try:
-        if len(req.password) < 8:
-            raise HTTPException(status_code=400, detail="Password minimal 8 karakter.")
+        validate_password_strength(req.password)
 
         username = req.username.strip().lower()
         if not username:
@@ -909,8 +984,7 @@ async def update_user(user_id: str, req: UserUpdate, admin: Dict = Depends(requi
                 raise HTTPException(status_code=400, detail="Tidak bisa menonaktifkan superadmin terakhir.")
         update_dict["isActive"] = req.isActive
     if req.password is not None:
-        if len(req.password) < 8:
-            raise HTTPException(status_code=400, detail="Password minimal 8 karakter.")
+        validate_password_strength(req.password)
         update_dict["passwordHash"] = hash_password(req.password)
 
     if update_dict:
@@ -1116,6 +1190,7 @@ async def get_license(current_user: Dict = Depends(get_current_user)):
 
 @api_router.post("/license/activate")
 async def activate_license(req: LicenseActivate, current_user: Dict = Depends(get_current_user)):
+    rate_limit("license_activate", current_user["userId"], max_attempts=10, window_seconds=600)
     uid = current_user["userId"]
     license_data = {
         "userId": uid,
@@ -1675,12 +1750,14 @@ async def reset_logs(current_user: Dict = Depends(get_current_user)):
 
 @api_router.post("/auth/change-password")
 async def change_password(req: ChangePasswordRequest, current_user: Dict = Depends(get_current_user)):
+    rate_limit("change_password", current_user["userId"], max_attempts=5, window_seconds=600)
     if not req.currentPassword or not req.newPassword:
         raise HTTPException(status_code=400, detail="Password lama dan baru wajib diisi.")
-    if len(req.newPassword) < 8:
-        raise HTTPException(status_code=400, detail="Password baru minimal 8 karakter.")
     if req.newPassword != req.confirmPassword:
         raise HTTPException(status_code=400, detail="Konfirmasi password tidak cocok.")
+    if req.currentPassword == req.newPassword:
+        raise HTTPException(status_code=400, detail="Password baru harus berbeda dari password lama.")
+    validate_password_strength(req.newPassword)
 
     user_id = current_user["userId"]
 
@@ -1701,19 +1778,8 @@ async def change_password(req: ChangePasswordRequest, current_user: Dict = Depen
         await add_log("PASSWORD_CHANGED", f"Password user '{current_user['username']}' berhasil diganti")
         return {"success": True, "token": new_token, "message": "Password berhasil diganti."}
 
-    # Legacy admin fallback
-    if not await verify_legacy_password(req.currentPassword):
-        raise HTTPException(status_code=400, detail="Password lama salah.")
-    hashed = hash_password(req.newPassword)
-    await db.config.update_one(
-        {"key": "admin_password_hash"},
-        {"$set": {"value": hashed, "updated_at": datetime.utcnow()}},
-        upsert=True
-    )
-    await db.sessions.delete_many({})
-    new_token = await create_session()
-    await add_log("PASSWORD_CHANGED", "Password admin berhasil diganti")
-    return {"success": True, "token": new_token, "message": "Password berhasil diganti."}
+    # User tidak ditemukan di koleksi users — sesi tidak valid lagi.
+    raise HTTPException(status_code=401, detail="Akun tidak ditemukan. Silakan login ulang.")
 
 # ============================================================
 # AI SETUP (proxy to SatroAI API)
@@ -1725,6 +1791,7 @@ AI_SETUP_APP_VERSION = "1.1.0-secure"
 
 @api_router.post("/ai-setup/chat")
 async def ai_setup_chat(req: AISetupMessage, current_user: Dict = Depends(get_current_user)):
+    rate_limit("ai_setup", current_user["userId"], max_attempts=30, window_seconds=600)
     license_doc = await db.license.find_one({"userId": current_user["userId"]}, {"_id": 0})
     if not license_doc or not license_doc.get("valid"):
         raise HTTPException(status_code=400, detail="Lisensi belum aktif. Aktifkan lisensi terlebih dahulu di menu Lisensi.")
@@ -1839,8 +1906,7 @@ async def delete_doc(slug: str, admin: Dict = Depends(require_superadmin)):
 
 @api_router.post("/docs/upload-image")
 async def upload_doc_image(req: ImageUpload, admin: Dict = Depends(require_superadmin)):
-    if not req.dataUrl.startswith("data:image/"):
-        raise HTTPException(status_code=400, detail="Format gambar tidak valid.")
+    validate_image_data_url(req.dataUrl, "Gambar")
     if len(req.dataUrl) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Ukuran gambar maksimal 5MB.")
     image_id = str(uuid.uuid4())
@@ -1885,8 +1951,8 @@ async def update_branding(req: BrandingUpdate, admin: Dict = Depends(require_sup
         val = getattr(req, field)
         if val is None:
             continue
-        if val and not val.startswith("data:image/"):
-            raise HTTPException(status_code=400, detail=f"{label} harus berupa data URL gambar (data:image/...).")
+        if val:
+            validate_image_data_url(val, label)
         if len(val) > max_bytes:
             raise HTTPException(status_code=400, detail=f"Ukuran {label} maksimal {max_bytes // (1024*1024)}MB.")
         await db.config.update_one(
@@ -2952,13 +3018,29 @@ async def root():
 # Include router and middleware
 app.include_router(api_router)
 
-# CORS — baca dari env var ALLOWED_ORIGINS (pisah koma), default "*" hanya untuk dev
+# CORS — baca dari env var ALLOWED_ORIGINS (pisah koma)
 _raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
-_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+_app_env = os.environ.get("APP_ENV", "development").lower()
+
+if not _allowed_origins:
+    if _app_env == "production":
+        # Fail-fast: jangan diam-diam izinkan semua origin di produksi.
+        raise RuntimeError(
+            "ALLOWED_ORIGINS wajib diisi di produksi. "
+            "Set env var ALLOWED_ORIGINS=https://domain1.com,https://domain2.com"
+        )
+    # Development only: izinkan wildcard. allow_credentials harus False bersamanya
+    # karena spek CORS melarang kombinasi "*" + credentials.
+    _allowed_origins = ["*"]
+    _allow_credentials = False
+    logger.warning("ALLOWED_ORIGINS kosong — fallback ke '*' (mode development).")
+else:
+    _allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_origins=_allowed_origins,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Api-Key"],
@@ -2968,14 +3050,31 @@ app.add_middleware(
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse as _JSONResponse
 
+# CSP: izinkan inline style (banyak komponen Radix/Tailwind pakai inline style),
+# data: untuk gambar base64 branding/favicon, dan https: untuk gambar pihak ketiga.
+_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data: https:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
+    "font-src 'self' data:; "
+    "connect-src 'self' https:; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        response.headers["Content-Security-Policy"] = _CSP
+        # HSTS hanya saat HTTPS (di balik reverse proxy, cek X-Forwarded-Proto)
+        if _app_env == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):

@@ -66,7 +66,14 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
     if (!form.username.trim()) e.username = 'Username wajib diisi';
     if (!form.fullName.trim()) e.fullName = 'Nama lengkap wajib diisi';
     if (!isEdit && !form.password) e.password = 'Password wajib diisi';
-    if (form.password && form.password.length < 8) e.password = 'Password minimal 8 karakter';
+    if (form.password && form.password.length < 12) e.password = 'Password minimal 12 karakter';
+    if (form.password && form.password.length >= 12) {
+      const hasLetter = /[A-Za-z]/.test(form.password);
+      const hasDigit = /\d/.test(form.password);
+      const hasSpecial = /[^A-Za-z0-9]/.test(form.password);
+      const categories = [hasLetter, hasDigit, hasSpecial].filter(Boolean).length;
+      if (categories < 2) e.password = 'Gunakan minimal 2 dari: huruf, angka, simbol';
+    }
     if (form.password && form.password !== form.confirmPassword) e.confirmPassword = 'Konfirmasi password tidak cocok';
     return e;
   };
@@ -206,7 +213,7 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
               <Input
                 type={showPassword ? 'text' : 'password'}
                 {...f('password')}
-                placeholder={isEdit ? 'Biarkan kosong jika tidak diubah' : 'Min. 8 karakter'}
+                placeholder={isEdit ? 'Biarkan kosong jika tidak diubah' : 'Min. 12 karakter, huruf+angka/simbol'}
                 className={`h-10 pr-10 ${errors.password ? 'border-red-400' : ''}`}
               />
               <button
