@@ -122,18 +122,18 @@ const Layout = () => {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex h-screen overflow-hidden bg-slate-50">
-        {/* Mobile overlay */}
+        {/* Mobile overlay — only on true mobile (<768px) */}
         {sidebarOpen && (
           <div
-            className="fixed inset-0 bg-black/40 z-40 lg:hidden backdrop-blur-sm"
+            className="fixed inset-0 bg-black/40 z-40 md:hidden backdrop-blur-sm"
             onClick={() => setSidebarOpen(false)}
           />
         )}
 
         {/* Sidebar */}
         <aside
-          className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col bg-slate-900 text-white transition-all duration-300 ease-in-out ${
-            sidebarOpen ? 'w-64' : 'w-0 lg:w-[68px]'
+          className={`fixed md:static inset-y-0 left-0 z-50 flex flex-col bg-slate-900 text-white transition-all duration-300 ease-in-out ${
+            sidebarOpen ? 'w-64' : 'w-0 md:w-[68px]'
           } overflow-hidden`}
         >
           {/* Logo area */}
@@ -152,7 +152,7 @@ const Layout = () => {
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               aria-label={sidebarOpen ? 'Tutup sidebar' : 'Buka sidebar'}
-              className="ml-auto p-1.5 rounded-lg hover:bg-white/10 transition-colors hidden lg:flex"
+              className="ml-auto p-1.5 rounded-lg hover:bg-white/10 transition-colors hidden md:flex"
             >
               <ChevronLeft className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${!sidebarOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -183,7 +183,7 @@ const Layout = () => {
                         aria-label={item.label}
                         onClick={() => {
                           setActiveTab(item.id);
-                          if (window.innerWidth < 1024) setSidebarOpen(false);
+                          if (window.innerWidth < 768) setSidebarOpen(false);
                         }}
                         className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 group ${
                           isActive
@@ -273,7 +273,7 @@ const Layout = () => {
           <header className="h-16 flex items-center px-4 lg:px-6 bg-white border-b border-slate-200 flex-shrink-0">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors mr-3"
+              className="md:hidden p-2 rounded-lg hover:bg-slate-100 transition-colors mr-3"
             >
               {sidebarOpen ? <X className="w-5 h-5 text-slate-600" /> : <Menu className="w-5 h-5 text-slate-600" />}
             </button>

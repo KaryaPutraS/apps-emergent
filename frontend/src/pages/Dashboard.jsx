@@ -109,7 +109,45 @@ const Dashboard = () => {
   useEffect(() => { fetchData(); }, []);
 
   if (loading || !stats) {
-    return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" /></div>;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-7 bg-slate-200 rounded-lg animate-pulse w-56" />
+            <div className="h-4 bg-slate-200 rounded animate-pulse w-72" />
+          </div>
+          <div className="h-8 bg-slate-200 rounded-lg animate-pulse w-24" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="h-3 bg-slate-200 rounded animate-pulse w-20 mb-3" />
+              <div className="h-8 bg-slate-200 rounded animate-pulse w-14" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="h-3 bg-slate-200 rounded animate-pulse w-20 mb-3" />
+              <div className="h-8 bg-slate-200 rounded animate-pulse w-14" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-6">
+            <div className="h-5 bg-slate-200 rounded animate-pulse w-48 mb-4" />
+            <div className="h-32 bg-slate-100 rounded-lg animate-pulse" />
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <div className="h-5 bg-slate-200 rounded animate-pulse w-32 mb-4" />
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => <div key={i} className="h-4 bg-slate-200 rounded animate-pulse" />)}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
