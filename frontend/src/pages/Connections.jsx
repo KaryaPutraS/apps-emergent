@@ -429,19 +429,59 @@ const Connections = () => {
         <p className="text-slate-500 text-sm mt-0.5">Setup WAHA WhatsApp API & AI Provider</p>
       </div>
 
-      {/* ── WhatsApp Connection (QR Panel) ── */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50">
-          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-            <Smartphone className="w-4 h-4 text-emerald-600" />
+      {/* ── WAHA Config ── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
+          <Wifi className="w-4 h-4 text-emerald-500" /> Konfigurasi WAHA
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">WAHA URL</label>
+            <Input value={wahaUrl} onChange={(e) => setWahaUrl(e.target.value)} placeholder="https://your-waha-server.com" />
           </div>
           <div>
-            <h3 className="font-semibold text-slate-900 text-sm">Status WhatsApp</h3>
-            <p className="text-xs text-slate-500">Scan QR code untuk menghubungkan akun WhatsApp</p>
+            <label className="text-sm font-medium text-slate-700 block mb-1.5">Session Name</label>
+            <Input value={wahaSession} onChange={(e) => setWahaSession(e.target.value)} placeholder="default" />
           </div>
         </div>
-        <div className="px-6 py-5">
-          <QrPanel wahaConfigured={wahaConfigured} />
+        <div className="mt-4">
+          <label className="text-sm font-medium text-slate-700 block mb-1.5">API Key <span className="text-xs font-normal text-slate-400">(opsional)</span></label>
+          <div className="relative">
+            <Input
+              type={showApiKey ? 'text' : 'password'}
+              value={wahaApiKey}
+              onChange={(e) => setWahaApiKey(e.target.value)}
+              placeholder="X-Api-Key dari WAHA"
+              className="pr-10"
+            />
+            <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Kosongkan jika WAHA tidak menggunakan autentikasi
+            {wahaApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
+          </p>
+        </div>
+        <div className="mt-4">
+          <label className="text-sm font-medium text-slate-700 block mb-1.5">
+            Backend URL Publik
+            <span className="ml-1.5 text-xs font-normal text-slate-400">(untuk webhook)</span>
+          </label>
+          <Input
+            value={backendUrl}
+            onChange={(e) => setBackendUrl(e.target.value)}
+            placeholder="https://yourdomain.com"
+          />
+          <p className="text-xs text-slate-400 mt-1">URL publik server ini — digunakan WAHA untuk mengirim pesan masuk ke dashboard</p>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <Button onClick={handleSaveWaha} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+            <Save className="w-4 h-4" /> Simpan
+          </Button>
+          <Button variant="outline" onClick={handleTestWaha} className="gap-2">
+            <Search className="w-4 h-4" /> Test Koneksi
+          </Button>
         </div>
       </div>
 
@@ -577,59 +617,19 @@ const Connections = () => {
         </div>
       </div>
 
-      {/* ── WAHA Config ── */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
-          <Wifi className="w-4 h-4 text-emerald-500" /> Konfigurasi WAHA
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">WAHA URL</label>
-            <Input value={wahaUrl} onChange={(e) => setWahaUrl(e.target.value)} placeholder="https://your-waha-server.com" />
+      {/* ── WhatsApp Connection (QR Panel) ── */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-100 bg-slate-50">
+          <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+            <Smartphone className="w-4 h-4 text-emerald-600" />
           </div>
           <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Session Name</label>
-            <Input value={wahaSession} onChange={(e) => setWahaSession(e.target.value)} placeholder="default" />
+            <h3 className="font-semibold text-slate-900 text-sm">Status WhatsApp</h3>
+            <p className="text-xs text-slate-500">Scan QR code untuk menghubungkan akun WhatsApp</p>
           </div>
         </div>
-        <div className="mt-4">
-          <label className="text-sm font-medium text-slate-700 block mb-1.5">API Key <span className="text-xs font-normal text-slate-400">(opsional)</span></label>
-          <div className="relative">
-            <Input
-              type={showApiKey ? 'text' : 'password'}
-              value={wahaApiKey}
-              onChange={(e) => setWahaApiKey(e.target.value)}
-              placeholder="X-Api-Key dari WAHA"
-              className="pr-10"
-            />
-            <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Kosongkan jika WAHA tidak menggunakan autentikasi
-            {wahaApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
-          </p>
-        </div>
-        <div className="mt-4">
-          <label className="text-sm font-medium text-slate-700 block mb-1.5">
-            Backend URL Publik
-            <span className="ml-1.5 text-xs font-normal text-slate-400">(untuk webhook)</span>
-          </label>
-          <Input
-            value={backendUrl}
-            onChange={(e) => setBackendUrl(e.target.value)}
-            placeholder="https://yourdomain.com"
-          />
-          <p className="text-xs text-slate-400 mt-1">URL publik server ini — digunakan WAHA untuk mengirim pesan masuk ke dashboard</p>
-        </div>
-        <div className="flex gap-2 mt-4">
-          <Button onClick={handleSaveWaha} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
-            <Save className="w-4 h-4" /> Simpan
-          </Button>
-          <Button variant="outline" onClick={handleTestWaha} className="gap-2">
-            <Search className="w-4 h-4" /> Test Koneksi
-          </Button>
+        <div className="px-6 py-5">
+          <QrPanel wahaConfigured={wahaConfigured} />
         </div>
       </div>
 
