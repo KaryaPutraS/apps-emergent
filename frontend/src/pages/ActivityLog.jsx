@@ -48,17 +48,20 @@ const ActivityRow = ({ item }) => {
   );
 };
 
+const PAGE_SIZE = 10;
+
 const ActivityLog = () => {
   const [activities, setActivities] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterUser, setFilterUser] = useState('');
+  const [page, setPage] = useState(1);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [actData, usersData] = await Promise.all([
-        getAllUserActivity(null, 200),
+        getAllUserActivity(null, 500),
         getUsers(),
       ]);
       setActivities(actData);
@@ -71,8 +74,26 @@ const ActivityLog = () => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPage(1); }, [filterUser]);
 
   const filtered = activities.filter(a => !filterUser || a.userId === filterUser);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pageItems = filtered.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // Build compact page list with ellipsis (e.g. 1 … 4 5 6 … 12)
+  const pageNumbers = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages = new Set([1, totalPages, currentPage, currentPage - 1, currentPage + 1]);
+    const sorted = [...pages].filter(p => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+    const result = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push('…');
+      result.push(sorted[i]);
+    }
+    return result;
+  })();
 
   return (
     <div className="space-y-6">
@@ -94,6 +115,11 @@ const ActivityLog = () => {
           <Activity className="w-4 h-4 text-emerald-600" />
           <span className="font-semibold text-slate-800 text-sm">
             {filtered.length} aktivitas{filterUser ? ' (difilter)' : ''}
+            {filtered.length > PAGE_SIZE && (
+              <span className="ml-2 font-normal text-slate-400">
+                · halaman {currentPage}/{totalPages}
+              </span>
+            )}
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
@@ -126,8 +152,8 @@ const ActivityLog = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((item, i) => (
-                  <ActivityRow key={i} item={item} />
+                {pageItems.map((item, i) => (
+                  <ActivityRow key={pageStart + i} item={item} />
                 ))}
                 {filtered.length === 0 && (
                   <tr>
@@ -138,6 +164,48 @@ const ActivityLog = () => {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!loading && totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs text-slate-500">
+              Menampilkan {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filtered.length)} dari {filtered.length}
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ‹ Prev
+              </button>
+              {pageNumbers.map((p, i) =>
+                p === '…' ? (
+                  <span key={`e${i}`} className="px-1.5 text-slate-400 text-xs">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`min-w-[28px] h-7 px-2 text-xs rounded-lg border transition-colors ${
+                      p === currentPage
+                        ? 'bg-emerald-600 border-emerald-600 text-white font-semibold'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-2.5 py-1 text-xs rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next ›
+              </button>
+            </div>
           </div>
         )}
       </div>
