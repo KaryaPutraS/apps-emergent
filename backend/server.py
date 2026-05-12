@@ -476,18 +476,35 @@ async def seed_defaults():
 
     # Sample rules - removed, use AI Setup to generate data
 
-    # License default
-    if await db.license.count_documents({}) == 0:
-        await db.license.insert_one({
-            "valid": False,
-            "status": "missing",
-            "licenseKey": "",
-            "customerName": "",
-            "planName": "",
-            "expiresAt": "",
-            "maxActivations": 0,
-            "instanceId": str(uuid.uuid4()),
-        })
+    # License: per-user isolation
+    try:
+        # Migrasi: license lama yang tanpa userId (atau userId="") di-copy ke
+        # semua user existing yang belum punya license, lalu dibuang.
+        legacy = await db.license.find_one({
+            "$or": [{"userId": {"$exists": False}}, {"userId": ""}]
+        }, {"_id": 0})
+        if legacy:
+            existing_users = await db.users.find({}, {"id": 1, "_id": 0}).to_list(1000)
+            for u in existing_users:
+                uid = str(u["id"])
+                if not uid:
+                    continue
+                has_own = await db.license.find_one({"userId": uid})
+                if has_own:
+                    continue
+                payload = {k: v for k, v in legacy.items() if k != "userId"}
+                payload["userId"] = uid
+                await db.license.insert_one(payload)
+            await db.license.delete_many({
+                "$or": [{"userId": {"$exists": False}}, {"userId": ""}]
+            })
+        # Index untuk lookup cepat per-user
+        try:
+            await db.license.create_index("userId", unique=True, sparse=True, name="license_userId_unique")
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[seed] WARNING: license migration failed: {e}")
 
     await ensure_admin_password()
     await seed_docs()
@@ -783,7 +800,7 @@ async def logout(current_user: Dict = Depends(get_current_user)):
 
 @api_router.get("/auth/check")
 async def check_session(current_user: Dict = Depends(get_current_user)):
-    license_doc = await db.license.find_one({}, {"_id": 0})
+    license_doc = await db.license.find_one({"userId": current_user["userId"]}, {"_id": 0})
     # Fetch webhookToken from users collection
     user_doc = await db.users.find_one({"id": current_user["userId"]})
     webhook_token = user_doc.get("webhookToken", "") if user_doc else ""
@@ -1030,39 +1047,22 @@ async def get_dashboard_chart(current_user: Dict = Depends(get_current_user)):
 # ============================================================
 
 async def _get_user_config(user_id: str) -> dict:
-    """Load config for a user.
-    Priority: user-specific non-empty > global non-empty > user-specific empty > global empty.
-    Empty user-specific values do NOT override non-empty global values,
-    preventing blank migration data from wiping out working config.
+    """Load config for a user. Each user is fully isolated — no global fallback.
+    Branding (siteName/favicon/logo) is handled via a separate endpoint.
     """
-    all_docs = await db.config.find(
-        {"key": {"$ne": "admin_password_hash"}, "userId": {"$in": [user_id, ""]}},
+    if not user_id:
+        return {}
+    docs = await db.config.find(
+        {"key": {"$ne": "admin_password_hash"}, "userId": user_id},
         {"_id": 0}
     ).to_list(400)
-
-    global_vals: dict = {}
-    user_vals: dict = {}
-
-    for c in all_docs:
-        uid = c.get("userId", "")
+    result: dict = {}
+    for c in docs:
         key = c["key"]
         val = c.get("value", "")
-        if uid == "":
-            # prefer non-empty if duplicate global keys exist
-            if key not in global_vals or (not global_vals[key] and val):
-                global_vals[key] = val
-        elif uid == user_id:
-            if key not in user_vals or (not user_vals[key] and val):
-                user_vals[key] = val
-
-    # Merge: start with global, then override with user-specific non-empty values
-    result = {**global_vals}
-    for key, val in user_vals.items():
-        if val not in ("", None):
+        # Keep the first non-empty value (defensive against duplicates)
+        if key not in result or (not result[key] and val):
             result[key] = val
-        elif key not in result:
-            result[key] = val
-
     return result
 
 @api_router.get("/config")
@@ -1109,13 +1109,16 @@ async def update_ai_agent_config(req: AIAgentConfig, current_user: Dict = Depend
 # ============================================================
 
 @api_router.get("/license")
-async def get_license(token: str = Depends(validate_token)):
-    doc = await db.license.find_one({}, {"_id": 0})
+async def get_license(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    doc = await db.license.find_one({"userId": uid}, {"_id": 0})
     return doc or {"valid": False, "status": "missing"}
 
 @api_router.post("/license/activate")
-async def activate_license(req: LicenseActivate, token: str = Depends(validate_token)):
+async def activate_license(req: LicenseActivate, current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
     license_data = {
+        "userId": uid,
         "valid": True,
         "status": "active",
         "licenseKey": req.licenseKey,
@@ -1125,17 +1128,25 @@ async def activate_license(req: LicenseActivate, token: str = Depends(validate_t
         "maxActivations": 3,
         "instanceId": str(uuid.uuid4()),
     }
-    await db.license.update_one({}, {"$set": license_data}, upsert=True)
-    await add_log("LICENSE_ACTIVATED", f"Lisensi diaktifkan: {req.licenseKey}")
+    await db.license.update_one({"userId": uid}, {"$set": license_data}, upsert=True)
+    await add_log("LICENSE_ACTIVATED", f"[{current_user['username']}] Lisensi diaktifkan: {req.licenseKey}", uid)
+    await log_user_activity(uid, current_user["username"], "LICENSE_ACTIVATED", f"Lisensi diaktifkan: {req.licenseKey}")
     return license_data
 
 @api_router.delete("/license")
-async def clear_license(token: str = Depends(validate_token)):
-    await db.license.update_one({}, {"$set": {
-        "valid": False, "status": "missing", "licenseKey": "",
-        "customerName": "", "planName": "", "expiresAt": ""
-    }}, upsert=True)
-    await add_log("LICENSE_CLEARED", "Lisensi dihapus")
+async def clear_license(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    await db.license.update_one(
+        {"userId": uid},
+        {"$set": {
+            "userId": uid,
+            "valid": False, "status": "missing", "licenseKey": "",
+            "customerName": "", "planName": "", "expiresAt": ""
+        }},
+        upsert=True
+    )
+    await add_log("LICENSE_CLEARED", f"[{current_user['username']}] Lisensi dihapus", uid)
+    await log_user_activity(uid, current_user["username"], "LICENSE_CLEARED", "Lisensi dihapus")
     return {"success": True}
 
 # ============================================================
@@ -1706,8 +1717,8 @@ AI_SETUP_PRODUCT_CODE = "satroai_chatbot_manager"
 AI_SETUP_APP_VERSION = "1.1.0-secure"
 
 @api_router.post("/ai-setup/chat")
-async def ai_setup_chat(req: AISetupMessage, token: str = Depends(validate_token)):
-    license_doc = await db.license.find_one({}, {"_id": 0})
+async def ai_setup_chat(req: AISetupMessage, current_user: Dict = Depends(get_current_user)):
+    license_doc = await db.license.find_one({"userId": current_user["userId"]}, {"_id": 0})
     if not license_doc or not license_doc.get("valid"):
         raise HTTPException(status_code=400, detail="Lisensi belum aktif. Aktifkan lisensi terlebih dahulu di menu Lisensi.")
 
@@ -2679,11 +2690,6 @@ async def _call_anthropic(model: str, api_key: str, system_prompt: str,
 
 async def get_waha_config(uid: str = ""):
     cfg = await _get_user_config(uid) if uid else {}
-    if not cfg:
-        # fallback to global config for backward compat
-        for key in ["wahaUrl", "wahaSession", "wahaApiKey"]:
-            doc = await db.config.find_one({"key": key, "userId": ""})
-            cfg[key] = doc["value"] if doc else ""
     url = cfg.get("wahaUrl", "").rstrip("/")
     session = cfg.get("wahaSession", "default") or "default"
     api_key = cfg.get("wahaApiKey", "")
