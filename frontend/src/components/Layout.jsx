@@ -4,10 +4,14 @@ import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
   Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings, SlidersHorizontal,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
-  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity
+  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity, ChevronDown
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger
+} from './ui/dropdown-menu';
 
 import Dashboard from '../pages/Dashboard';
 import License from '../pages/License';
@@ -147,6 +151,7 @@ const Layout = () => {
             </div>
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
+              aria-label={sidebarOpen ? 'Tutup sidebar' : 'Buka sidebar'}
               className="ml-auto p-1.5 rounded-lg hover:bg-white/10 transition-colors hidden lg:flex"
             >
               <ChevronLeft className={`w-4 h-4 text-slate-400 transition-transform duration-300 ${!sidebarOpen ? 'rotate-180' : ''}`} />
@@ -175,6 +180,7 @@ const Layout = () => {
                     const btn = (
                       <button
                         key={item.id}
+                        aria-label={item.label}
                         onClick={() => {
                           setActiveTab(item.id);
                           if (window.innerWidth < 1024) setSidebarOpen(false);
@@ -234,13 +240,29 @@ const Layout = () => {
               </div>
             )}
             <div className="p-3 pt-0">
-              <button
-                onClick={logout}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 ${!sidebarOpen ? 'justify-center' : ''}`}
-              >
-                <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
-                {sidebarOpen && <span>Logout</span>}
-              </button>
+              {!sidebarOpen ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={logout}
+                      aria-label="Logout"
+                      className="w-full flex items-center justify-center px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+                    >
+                      <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="text-xs">Logout</TooltipContent>
+                </Tooltip>
+              ) : (
+                <button
+                  onClick={logout}
+                  aria-label="Logout"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+                >
+                  <LogOut className="w-[18px] h-[18px] flex-shrink-0" />
+                  <span>Logout</span>
+                </button>
+              )}
             </div>
           </div>
         </aside>
@@ -264,28 +286,40 @@ const Layout = () => {
                 <span className="text-xs font-medium text-emerald-700">Bot Aktif</span>
               </div>
               {currentUser && (
-                <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-full">
-                  <UserCircle className="w-4 h-4 text-slate-500" />
-                  <span className="text-xs font-medium text-slate-700">
-                    {currentUser.fullName || currentUser.username}
-                  </span>
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                    role === 'superadmin' ? 'bg-emerald-100 text-emerald-700' :
-                    'bg-blue-100 text-blue-700'
-                  }`}>
-                    {badge.label}
-                  </span>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+                      <UserCircle className="w-4 h-4 text-slate-500" />
+                      <span className="text-xs font-medium text-slate-700">
+                        {currentUser.fullName || currentUser.username}
+                      </span>
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                        role === 'superadmin' ? 'bg-emerald-100 text-emerald-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {badge.label}
+                      </span>
+                      <ChevronDown className="w-3 h-3 text-slate-400" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuLabel className="font-normal">
+                      <div className="flex flex-col gap-0.5">
+                        <p className="text-sm font-semibold text-slate-900">{currentUser.fullName || currentUser.username}</p>
+                        <p className="text-xs text-slate-500">{badge.label}</p>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={logout}
+                      className="text-red-500 focus:text-red-600 focus:bg-red-50 gap-2 cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Logout
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={logout}
-                className="text-slate-500 hover:text-red-500 hover:bg-red-50 hidden sm:flex"
-              >
-                <LogOut className="w-4 h-4 mr-1.5" />
-                Logout
-              </Button>
             </div>
           </header>
 

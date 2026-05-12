@@ -95,7 +95,7 @@ function App() {
     <AppContext.Provider value={contextValue}>
       <div className="min-h-screen bg-slate-50">
         {!isLoggedIn ? <LoginPage /> : <Layout />}
-        <Toaster position="top-right" richColors />
+        <Toaster position="bottom-right" richColors offset={16} />
       </div>
     </AppContext.Provider>
   );
