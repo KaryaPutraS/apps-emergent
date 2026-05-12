@@ -423,7 +423,7 @@ const Connections = () => {
   const models = aiModelOptions[provider] || [];
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Koneksi & Integrasi</h1>
         <p className="text-slate-500 text-sm mt-0.5">Setup WAHA WhatsApp API & AI Provider</p>
