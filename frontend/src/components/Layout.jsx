@@ -128,9 +128,9 @@ const Layout = () => {
         >
           {/* Logo area */}
           <div className="flex items-center h-16 px-4 border-b border-white/10 flex-shrink-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20 overflow-hidden">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden ${logoDataUrl ? '' : 'bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/20'}`}>
               {logoDataUrl ? (
-                <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain" />
+                <img src={logoDataUrl} alt="logo" className="w-9 h-9 object-contain" />
               ) : (
                 <Bot className="w-5 h-5 text-white" />
               )}

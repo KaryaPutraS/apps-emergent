@@ -142,9 +142,9 @@ const Branding = () => {
           <div>
             <label className="text-sm font-medium text-slate-700 block mb-1.5">Logo Dashboard & Login</label>
             <div className="flex items-center gap-4">
-              <div className="w-20 h-20 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center overflow-hidden">
+              <div className="w-20 h-20 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
                 {logoDataUrl ? (
-                  <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain p-2" />
+                  <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain" />
                 ) : (
                   <ImageIcon className="w-7 h-7 text-slate-400" />
                 )}

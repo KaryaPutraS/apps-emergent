@@ -46,9 +46,9 @@ const LoginPage = () => {
         <div className="bg-white rounded-2xl shadow-2xl shadow-black/20 p-8 border border-slate-200/50">
           {/* Logo */}
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 overflow-hidden">
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center overflow-hidden ${logoDataUrl ? '' : 'bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg shadow-emerald-500/25'}`}>
               {logoDataUrl ? (
-                <img src={logoDataUrl} alt="logo" className="w-full h-full object-contain p-2" />
+                <img src={logoDataUrl} alt="logo" className="w-16 h-16 object-contain" />
               ) : (
                 <Bot className="w-8 h-8 text-white" />
               )}
