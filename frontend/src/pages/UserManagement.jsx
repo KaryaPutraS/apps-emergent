@@ -505,8 +505,8 @@ const UserManagement = () => {
                           <button
                             onClick={() => handleToggle(u)}
                             disabled={togglingId === u.id || isSelf}
-                            title={isSelf ? 'Tidak bisa menonaktifkan akun sendiri' : u.isActive ?? u.is_active ? 'Klik untuk nonaktifkan' : 'Klik untuk aktifkan'}
-                            className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${
+                            title={isSelf ? 'Tidak bisa menonaktifkan akun sendiri' : (u.isActive ?? u.is_active) ? 'Klik untuk nonaktifkan' : 'Klik untuk aktifkan'}
+                            className={`relative w-10 h-5 rounded-full transition-colors flex-shrink-0 ${
                               isSelf
                                 ? 'opacity-30 cursor-not-allowed bg-slate-300'
                                 : (u.isActive ?? u.is_active)
@@ -519,7 +519,7 @@ const UserManagement = () => {
                                 <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin block" />
                               </span>
                             ) : (
-                              <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(u.isActive ?? u.is_active) ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                              <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(u.isActive ?? u.is_active) ? 'translate-x-5' : 'translate-x-0'}`} />
                             )}
                           </button>
 
