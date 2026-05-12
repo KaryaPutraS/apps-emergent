@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
   Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
-  UserCog, ShieldCheck, UserCircle, BookMarked, Palette
+  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
@@ -27,9 +27,11 @@ import Logs from '../pages/Logs';
 import UserManagement from '../pages/UserManagement';
 import Documentation from '../pages/Documentation';
 import Branding from '../pages/Branding';
+import ActivityLog from '../pages/ActivityLog';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
+  { id: 'activity-log', label: 'Log Aktivitas', icon: Activity, group: 'main' },
   { id: 'branding', label: 'Branding', icon: Palette, group: 'main' },
   { id: 'docs', label: 'Dokumentasi', icon: BookMarked, group: 'main' },
 ];
@@ -76,6 +78,7 @@ const pageComponents = {
   'test-center': TestCenter,
   'logs': Logs,
   'user-management': UserManagement,
+  'activity-log': ActivityLog,
   'branding': Branding,
   'reset-data': ResetData,
   'settings': SettingsPage,
@@ -98,8 +101,8 @@ const Layout = () => {
   const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
 
   // Superadmin can access user-management, branding, and docs; user never accesses these
-  const superadminAllowed = ['user-management', 'branding', 'docs'];
-  const userBlocked = ['user-management', 'branding'];
+  const superadminAllowed = ['user-management', 'activity-log', 'branding', 'docs'];
+  const userBlocked = ['user-management', 'activity-log', 'branding'];
   const safeTab = isSuperAdmin
     ? (superadminAllowed.includes(activeTab) ? activeTab : 'user-management')
     : (userBlocked.includes(activeTab) ? 'dashboard' : activeTab);
