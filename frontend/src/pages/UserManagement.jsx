@@ -242,9 +242,9 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
             <button
               type="button"
               onClick={() => setForm(p => ({ ...p, isActive: !p.isActive }))}
-              className={`relative w-11 h-6 rounded-full transition-colors ${form.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}
+              className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${form.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}
             >
-              <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.isActive ? 'translate-x-6' : 'translate-x-1'}`} />
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.isActive ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
           </div>
 
