@@ -1662,6 +1662,13 @@ async def reset_contacts(current_user: Dict = Depends(get_current_user)):
     await add_log("RESET_CONTACTS", f"[{current_user['username']}] Data kontak direset ({result.deleted_count} kontak dihapus)", uid)
     return {"success": True, "message": f"Data kontak berhasil direset. {result.deleted_count} kontak dihapus."}
 
+@api_router.post("/reset/logs")
+async def reset_logs(current_user: Dict = Depends(get_current_user)):
+    uid = current_user["userId"]
+    result = await db.logs.delete_many({"userId": uid})
+    await add_log("RESET_LOGS", f"[{current_user['username']}] Data log direset ({result.deleted_count} entri dihapus)", uid)
+    return {"success": True, "message": f"Data log berhasil direset. {result.deleted_count} entri dihapus."}
+
 # ============================================================
 # PASSWORD CHANGE
 # ============================================================
@@ -2454,7 +2461,7 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                 ai_reply, tokens_used = await call_ai(provider, model, ai_api_key, system_prompt, ai_messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
                 if ai_reply:
                     reply_text = ai_reply
-                    response_type = "ai"
+                    response_type = "combo" if rule_text else "ai"
                     await add_log("AI_CALL", f"[{user['username']}] ✅ AI menjawab ({len(ai_reply)} karakter, {tokens_used} token)", uid)
                 else:
                     await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI mengembalikan balasan kosong (provider={provider}, model={model}). Cek API key & kuota.", uid)

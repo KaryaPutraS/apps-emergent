@@ -414,6 +414,11 @@ export const resetContacts = async () => {
   return data;
 };
 
+export const resetLogs = async () => {
+  const { data } = await apiClient.post('/reset/logs');
+  return data;
+};
+
 // ============================================================
 // PASSWORD
 // ============================================================

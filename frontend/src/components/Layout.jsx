@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../App';
 import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
-  Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings,
+  Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings, SlidersHorizontal,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
   UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity
 } from 'lucide-react';
@@ -28,6 +28,7 @@ import UserManagement from '../pages/UserManagement';
 import Documentation from '../pages/Documentation';
 import Branding from '../pages/Branding';
 import ActivityLog from '../pages/ActivityLog';
+import BotSettings from '../pages/BotSettings';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
@@ -44,6 +45,7 @@ const userNavItems = [
   { id: 'rules', label: 'Rules Engine', icon: GitBranch, group: 'bot' },
   { id: 'knowledge', label: 'Knowledge Base', icon: BookOpen, group: 'bot' },
   { id: 'templates', label: 'Template', icon: FileText, group: 'bot' },
+  { id: 'bot-settings', label: 'Pengaturan BOT', icon: SlidersHorizontal, group: 'bot' },
   { id: 'contacts', label: 'Kontak', icon: Users, group: 'data' },
   { id: 'messages', label: 'Pesan', icon: MessageSquare, group: 'data' },
   { id: 'broadcast', label: 'Broadcast', icon: Radio, group: 'data' },
@@ -82,6 +84,7 @@ const pageComponents = {
   'branding': Branding,
   'reset-data': ResetData,
   'settings': SettingsPage,
+  'bot-settings': BotSettings,
   'docs': Documentation,
 };
 
