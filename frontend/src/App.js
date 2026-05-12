@@ -14,7 +14,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
   const [checking, setChecking] = useState(true);
   const [branding, setBranding] = useState({ siteName: 'adminpintar.id', faviconDataUrl: '', logoDataUrl: '' });
 
@@ -95,7 +95,7 @@ function App() {
     <AppContext.Provider value={contextValue}>
       <div className="min-h-screen bg-slate-50">
         {!isLoggedIn ? <LoginPage /> : <Layout />}
-        <Toaster position="top-right" richColors />
+        <Toaster position="bottom-right" richColors offset={16} />
       </div>
     </AppContext.Provider>
   );

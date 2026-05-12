@@ -299,6 +299,7 @@ const Connections = () => {
   const [settingWebhook, setSettingWebhook] = useState(false);
   const [debugInfo, setDebugInfo] = useState(null);
   const [debugging, setDebugging] = useState(false);
+  const [showWebhookToken, setShowWebhookToken] = useState(false);
 
   // Compute webhook URL from backendUrl + currentUser token
   const myWebhookUrl = React.useMemo(() => {
@@ -307,6 +308,14 @@ const Connections = () => {
     if (!base || !tok) return null;
     return `${base}/webhook/${tok}`;
   }, [backendUrl, currentUser]);
+
+  const maskedWebhookUrl = React.useMemo(() => {
+    if (!myWebhookUrl) return null;
+    const lastSlash = myWebhookUrl.lastIndexOf('/');
+    const base = myWebhookUrl.slice(0, lastSlash + 1);
+    const token = myWebhookUrl.slice(lastSlash + 1);
+    return showWebhookToken ? myWebhookUrl : `${base}${'•'.repeat(Math.min(token.length, 20))}`;
+  }, [myWebhookUrl, showWebhookToken]);
 
   useEffect(() => {
     getConfig().then(data => {
@@ -455,13 +464,18 @@ const Connections = () => {
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
                 <Link2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                 <code className="text-xs font-mono text-slate-600 flex-1 break-all">
-                  {myWebhookUrl
-                    ? myWebhookUrl
+                  {maskedWebhookUrl
+                    ? maskedWebhookUrl
                     : <span className="text-slate-400 italic">
                         {!backendUrl ? 'Isi Backend URL terlebih dahulu' : 'Token tidak tersedia — coba logout lalu login ulang'}
                       </span>
                   }
                 </code>
+                {myWebhookUrl && (
+                  <button onClick={() => setShowWebhookToken(v => !v)} aria-label={showWebhookToken ? 'Sembunyikan token' : 'Tampilkan token'} className="flex-shrink-0 text-slate-400 hover:text-slate-600">
+                    {showWebhookToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                )}
                 {myWebhookUrl && (
                   <button onClick={() => { navigator.clipboard.writeText(myWebhookUrl); toast.success('URL disalin!'); }} className="flex-shrink-0 text-slate-400 hover:text-slate-600">
                     <Copy className="w-3.5 h-3.5" />
@@ -546,10 +560,15 @@ const Connections = () => {
         </p>
         <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
           <code className="text-xs font-mono text-slate-600 flex-1 break-all">
-            {myWebhookUrl || (
+            {maskedWebhookUrl || (
               <span className="text-slate-400 italic">Isi Backend URL di Konfigurasi WAHA dan simpan terlebih dahulu</span>
             )}
           </code>
+          {myWebhookUrl && (
+            <button onClick={() => setShowWebhookToken(v => !v)} aria-label={showWebhookToken ? 'Sembunyikan token' : 'Tampilkan token'} className="flex-shrink-0 text-slate-400 hover:text-slate-600">
+              {showWebhookToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          )}
           {myWebhookUrl && (
             <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(myWebhookUrl); toast.success('URL disalin!'); }} className="flex-shrink-0 gap-1.5">
               <Copy className="w-3.5 h-3.5" /> Copy

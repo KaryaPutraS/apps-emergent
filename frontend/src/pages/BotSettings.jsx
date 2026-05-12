@@ -122,10 +122,34 @@ const BotSettings = () => {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div><label className="text-sm font-medium text-slate-700 block mb-1.5">Jam Buka (default)</label><Input type="time" value={val('workingHoursStart', '08:00')} onChange={(e) => set('workingHoursStart', e.target.value)} /></div>
-          <div><label className="text-sm font-medium text-slate-700 block mb-1.5">Jam Tutup (default)</label><Input type="time" value={val('workingHoursEnd', '21:00')} onChange={(e) => set('workingHoursEnd', e.target.value)} /></div>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-sm font-medium text-slate-700">Jam Buka (default)</label>
+              {val('timezone') && <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{val('timezone')}</span>}
+            </div>
+            <Input type="time" value={val('workingHoursStart', '08:00')} onChange={(e) => set('workingHoursStart', e.target.value)} />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-sm font-medium text-slate-700">Jam Tutup (default)</label>
+              {val('timezone') && <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{val('timezone')}</span>}
+            </div>
+            <Input type="time" value={val('workingHoursEnd', '21:00')} onChange={(e) => set('workingHoursEnd', e.target.value)} />
+          </div>
         </div>
-        <div className="mt-4"><label className="text-sm font-medium text-slate-700 block mb-1.5">Pesan di Luar Jam</label><Textarea value={val('offlineMessage', '')} onChange={(e) => set('offlineMessage', e.target.value)} rows={3} /></div>
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-sm font-medium text-slate-700">Pesan di Luar Jam</label>
+            <span className={`text-xs ${(val('offlineMessage', '')).length > 1800 ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
+              {(val('offlineMessage', '')).length}/2000
+            </span>
+          </div>
+          <Textarea
+            value={val('offlineMessage', '')}
+            onChange={(e) => { if (e.target.value.length <= 2000) set('offlineMessage', e.target.value); }}
+            rows={3}
+          />
+        </div>
       </div>
 
       {/* Notifikasi Owner */}

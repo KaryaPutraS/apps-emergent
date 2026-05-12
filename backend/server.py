@@ -2588,7 +2588,6 @@ async def send_waha_text(waha_url: str, session: str, api_key: str, chat_id: str
         headers["X-Api-Key"] = api_key
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            # Try sendText endpoint (common WAHA format)
             r = await client.post(
                 f"{waha_url}/api/sendText",
                 json={"chatId": chat_id, "text": text, "session": session},
@@ -2596,14 +2595,18 @@ async def send_waha_text(waha_url: str, session: str, api_key: str, chat_id: str
             )
             if r.status_code in (200, 201):
                 return
-            # Fallback: messages/send
-            await client.post(
+            primary_status = r.status_code
+            primary_body = r.text[:200]
+            r2 = await client.post(
                 f"{waha_url}/api/{session}/messages/send",
                 json={"chatId": chat_id, "body": text},
                 headers=headers,
             )
+            if r2.status_code in (200, 201):
+                return
+            await add_log("WAHA_SEND_ERROR", f"Gagal kirim ke {chat_id}: sendText={primary_status} body={primary_body} | fallback={r2.status_code} body={r2.text[:200]}")
     except Exception as e:
-        await add_log("WAHA_SEND_ERROR", f"Gagal kirim ke {chat_id}: {str(e)}")
+        await add_log("WAHA_SEND_ERROR", f"Exception kirim ke {chat_id}: {str(e)}")
 
 
 async def call_ai(provider: str, model: str, api_key: str, system_prompt: str,

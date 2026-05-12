@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getLogs, resetLogs } from '../api/apiClient';
 import { formatWaktu } from '../utils/time';
-import { RefreshCw, Trash2 } from 'lucide-react';
+import { RefreshCw, Trash2, Search, X, Filter } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
@@ -34,6 +34,15 @@ const logTypeColors = {
   WAHA_SEND_ERROR: 'bg-red-50 text-red-600',
 };
 
+const TYPE_GROUPS = [
+  { label: 'Pesan', types: ['MESSAGE_IN', 'MESSAGE_OUT', 'WEBHOOK_IN', 'WEBHOOK_SKIP', 'WAHA_SEND'] },
+  { label: 'Bot/AI', types: ['RULE_MATCH', 'RULE_HIT', 'AI_CALL', 'KNOWLEDGE_MATCH'] },
+  { label: 'Konfigurasi', types: ['CONFIG_UPDATE', 'RULE_SAVED', 'RULE_DELETED'] },
+  { label: 'Reset', types: ['RESET_CONFIG', 'RESET_MESSAGES', 'RESET_CONTACTS', 'RESET_LOGS'] },
+  { label: 'Error', types: ['AI_ERROR', 'WAHA_ERROR', 'WAHA_SEND_ERROR', 'LOGIN_FAILED'] },
+  { label: 'Auth', types: ['LOGIN_SUCCESS', 'LOGIN_FAILED', 'PASSWORD_CHANGED'] },
+];
+
 function parseSumber(log) {
   if (log.type !== 'MESSAGE_OUT') return null;
   const msg = log.message || '';
@@ -50,6 +59,8 @@ const Logs = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState('');
   const timezone = localStorage.getItem('userTimezone') || 'WIB';
 
   const fetchData = useCallback(async () => {
@@ -78,10 +89,30 @@ const Logs = () => {
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE));
+  // Unique types present in current logs data
+  const availableTypes = useMemo(() => {
+    const s = new Set(logs.map(l => l.type));
+    return [...s].sort();
+  }, [logs]);
+
+  // Filtered logs
+  const filteredLogs = useMemo(() => {
+    let result = logs;
+    if (filterType) result = result.filter(l => l.type === filterType);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(l => (l.message || '').toLowerCase().includes(q) || (l.type || '').toLowerCase().includes(q));
+    }
+    return result;
+  }, [logs, filterType, searchQuery]);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [filterType, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pageItems = logs.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageItems = filteredLogs.slice(pageStart, pageStart + PAGE_SIZE);
 
   const pageNumbers = (() => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -95,8 +126,10 @@ const Logs = () => {
     return result;
   })();
 
+  const hasFilters = filterType || searchQuery.trim();
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Logs & Debugging</h1>
@@ -120,18 +153,86 @@ const Logs = () => {
         </div>
       </div>
 
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-2 items-center">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Cari pesan log..."
+            className="w-full h-9 pl-9 pr-8 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent"
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Type filter */}
+        <div className="relative">
+          <Filter className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="h-9 pl-8 pr-8 text-sm border border-slate-200 rounded-lg bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-emerald-400 min-w-[160px]"
+          >
+            <option value="">Semua Tipe</option>
+            {TYPE_GROUPS.map(g => (
+              <optgroup key={g.label} label={`── ${g.label} ──`}>
+                {g.types.filter(t => availableTypes.includes(t)).map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </optgroup>
+            ))}
+            {/* Types not in any group */}
+            {availableTypes
+              .filter(t => !TYPE_GROUPS.flatMap(g => g.types).includes(t))
+              .map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+
+        {/* Active filter chips */}
+        {hasFilters && (
+          <button
+            onClick={() => { setSearchQuery(''); setFilterType(''); }}
+            className="text-xs text-slate-500 hover:text-red-500 flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-200 hover:border-red-200 hover:bg-red-50 transition-colors"
+          >
+            <X className="w-3 h-3" /> Hapus Filter
+          </button>
+        )}
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {/* Table header info */}
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500">
-          <span className="font-semibold text-slate-800">{logs.length} entri log</span>
-          {logs.length > PAGE_SIZE && (
-            <span className="font-normal text-slate-400">· halaman {currentPage}/{totalPages}</span>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 flex-wrap">
+          <span className="font-semibold text-slate-800">
+            {hasFilters
+              ? <>{filteredLogs.length} hasil <span className="font-normal text-slate-400">dari {logs.length} total entri</span></>
+              : <>{logs.length} entri log</>
+            }
+          </span>
+          {filteredLogs.length > PAGE_SIZE && (
+            <span className="text-slate-400">· halaman {currentPage}/{totalPages}</span>
+          )}
+          {filterType && (
+            <Badge className={`text-[10px] font-mono ${logTypeColors[filterType] || 'bg-slate-100 text-slate-500'}`}>{filterType}</Badge>
           )}
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="w-8 h-8 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
+          <div className="space-y-0">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="flex gap-4 px-4 py-3 border-b border-slate-100">
+                <div className="h-4 bg-slate-200 rounded animate-pulse w-32 shrink-0" />
+                <div className="h-4 bg-slate-200 rounded animate-pulse w-28 shrink-0" />
+                <div className="h-4 bg-slate-200 rounded animate-pulse w-16 shrink-0 hidden sm:block" />
+                <div className="h-4 bg-slate-200 rounded animate-pulse flex-1" />
+              </div>
+            ))}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -154,11 +255,21 @@ const Logs = () => {
                     <td className="py-3 px-3">
                       {(() => { const s = parseSumber(log); return s ? <Badge className={`text-[10px] ${s.cls} hover:opacity-90`}>{s.label}</Badge> : null; })()}
                     </td>
-                    <td className="py-3 px-3 text-slate-600">{log.message}</td>
+                    <td className="py-3 px-3 text-slate-600">
+                      {searchQuery ? (
+                        <HighlightText text={log.message || ''} query={searchQuery} />
+                      ) : (
+                        log.message
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {logs.length === 0 && (
-                  <tr><td colSpan="4" className="py-10 text-center text-slate-400">Belum ada log.</td></tr>
+                {filteredLogs.length === 0 && (
+                  <tr>
+                    <td colSpan="4" className="py-10 text-center text-slate-400">
+                      {hasFilters ? 'Tidak ada log yang cocok dengan filter.' : 'Belum ada log.'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -169,7 +280,7 @@ const Logs = () => {
         {!loading && totalPages > 1 && (
           <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-slate-500">
-              Menampilkan {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, logs.length)} dari {logs.length}
+              Menampilkan {pageStart + 1}–{Math.min(pageStart + PAGE_SIZE, filteredLogs.length)} dari {filteredLogs.length}
             </p>
             <div className="flex items-center gap-1">
               <button
@@ -208,6 +319,21 @@ const Logs = () => {
         )}
       </div>
     </div>
+  );
+};
+
+// Highlight matching text in search results
+const HighlightText = ({ text, query }) => {
+  if (!query) return text;
+  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase()
+          ? <mark key={i} className="bg-yellow-100 text-yellow-900 rounded px-0.5">{part}</mark>
+          : part
+      )}
+    </>
   );
 };
 

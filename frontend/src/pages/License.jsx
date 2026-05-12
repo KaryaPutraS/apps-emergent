@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getLicense, activateLicense, clearLicense } from '../api/apiClient';
-import { Key, RefreshCw, Check, AlertCircle, Trash2, Shield, Calendar, User, Package } from 'lucide-react';
+import { Key, RefreshCw, Check, AlertCircle, Trash2, Shield, Calendar, User, Package, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Badge } from '../components/ui/badge';
@@ -10,6 +10,7 @@ const License = () => {
   const [license, setLicense] = useState(null);
   const [loading, setLoading] = useState(true);
   const [licenseKey, setLicenseKey] = useState('');
+  const [showLicenseKey, setShowLicenseKey] = useState(false);
 
   const fetchData = async () => {
     try { setLoading(true); const data = await getLicense(); setLicense(data); } catch (e) { toast.error('Gagal memuat data lisensi'); } finally { setLoading(false); }
@@ -55,7 +56,7 @@ const License = () => {
           </div>
           {license?.valid && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="flex items-center gap-2 text-sm"><Key className="w-4 h-4 text-slate-400" /><span className="text-slate-500">Key:</span><span className="font-mono text-slate-700">{license.licenseKey}</span></div>
+              <div className="flex items-center gap-2 text-sm"><Key className="w-4 h-4 text-slate-400 flex-shrink-0" /><span className="text-slate-500">Key:</span><span className="font-mono text-slate-700">{showLicenseKey ? license.licenseKey : `${license.licenseKey.slice(0, 8)}••••••••`}</span><button onClick={() => setShowLicenseKey(v => !v)} aria-label={showLicenseKey ? 'Sembunyikan license key' : 'Tampilkan license key'} className="text-slate-400 hover:text-slate-600 flex-shrink-0">{showLicenseKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}</button></div>
               <div className="flex items-center gap-2 text-sm"><User className="w-4 h-4 text-slate-400" /><span className="text-slate-500">Customer:</span><span className="text-slate-700">{license.customerName}</span></div>
               <div className="flex items-center gap-2 text-sm"><Package className="w-4 h-4 text-slate-400" /><span className="text-slate-500">Plan:</span><span className="text-slate-700">{license.planName}</span></div>
               <div className="flex items-center gap-2 text-sm"><Calendar className="w-4 h-4 text-slate-400" /><span className="text-slate-500">Expires:</span><span className="text-slate-700">{license.expiresAt}</span></div>

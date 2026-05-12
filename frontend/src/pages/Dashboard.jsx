@@ -40,24 +40,44 @@ const StatCard = ({ icon: Icon, label, value, trend, color }) => {
 };
 
 const MiniChart = ({ data }) => {
-  if (!data || data.length === 0) return <div className="text-center py-8 text-slate-400 text-sm">Belum ada data</div>;
+  if (!data || data.length === 0) return (
+    <div className="flex flex-col items-center justify-center py-8 text-slate-400 gap-2">
+      <TrendingUp className="w-8 h-8 opacity-20" />
+      <p className="text-sm">Belum ada data aktivitas</p>
+    </div>
+  );
+  const hasAnyData = data.some(d => (d.messagesIn || 0) > 0 || (d.messagesOut || 0) > 0);
   const max = Math.max(...data.map(d => Math.max(d.messagesIn || 0, d.messagesOut || 0)), 1);
   return (
-    <div className="flex items-end gap-1.5 h-32 mt-4">
-      {data.map((d, i) => {
-        const height = ((d.messagesIn || 0) / max) * 100;
-        const heightOut = ((d.messagesOut || 0) / max) * 100;
-        const day = new Date(d.date).toLocaleDateString('id-ID', { weekday: 'short' });
-        return (
-          <div key={i} className="flex-1 flex flex-col items-center gap-1">
-            <div className="w-full flex gap-0.5 items-end" style={{ height: '100px' }}>
-              <div className="flex-1 bg-emerald-400 rounded-t-md transition-all duration-500 hover:bg-emerald-500" style={{ height: `${height}%` }} title={`Masuk: ${d.messagesIn}`} />
-              <div className="flex-1 bg-teal-300 rounded-t-md transition-all duration-500 hover:bg-teal-400" style={{ height: `${heightOut}%` }} title={`Keluar: ${d.messagesOut}`} />
+    <div>
+      {!hasAnyData && (
+        <p className="text-xs text-slate-400 text-center mt-2 mb-1">Belum ada pesan dalam 7 hari terakhir</p>
+      )}
+      <div className="flex items-end gap-1.5 h-32 mt-4">
+        {data.map((d, i) => {
+          const hasData = (d.messagesIn || 0) > 0 || (d.messagesOut || 0) > 0;
+          const height = ((d.messagesIn || 0) / max) * 100;
+          const heightOut = ((d.messagesOut || 0) / max) * 100;
+          const day = new Date(d.date).toLocaleDateString('id-ID', { weekday: 'short' });
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div className="w-full flex gap-0.5 items-end" style={{ height: '100px' }}>
+                {hasData ? (
+                  <>
+                    <div className="flex-1 bg-emerald-400 rounded-t-md transition-all duration-500 hover:bg-emerald-500" style={{ height: `${Math.max(height, height > 0 ? 4 : 0)}%` }} title={`Masuk: ${d.messagesIn}`} />
+                    <div className="flex-1 bg-teal-300 rounded-t-md transition-all duration-500 hover:bg-teal-400" style={{ height: `${Math.max(heightOut, heightOut > 0 ? 4 : 0)}%` }} title={`Keluar: ${d.messagesOut}`} />
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-end">
+                    <div className="w-full h-1 bg-slate-100 rounded-sm" title="Tidak ada data" />
+                  </div>
+                )}
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium">{day}</span>
             </div>
-            <span className="text-[10px] text-slate-400 font-medium">{day}</span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -89,7 +109,45 @@ const Dashboard = () => {
   useEffect(() => { fetchData(); }, []);
 
   if (loading || !stats) {
-    return <div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-3 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" /></div>;
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <div className="h-7 bg-slate-200 rounded-lg animate-pulse w-56" />
+            <div className="h-4 bg-slate-200 rounded animate-pulse w-72" />
+          </div>
+          <div className="h-8 bg-slate-200 rounded-lg animate-pulse w-24" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="h-3 bg-slate-200 rounded animate-pulse w-20 mb-3" />
+              <div className="h-8 bg-slate-200 rounded animate-pulse w-14" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="h-3 bg-slate-200 rounded animate-pulse w-20 mb-3" />
+              <div className="h-8 bg-slate-200 rounded animate-pulse w-14" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-6">
+            <div className="h-5 bg-slate-200 rounded animate-pulse w-48 mb-4" />
+            <div className="h-32 bg-slate-100 rounded-lg animate-pulse" />
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 p-6">
+            <div className="h-5 bg-slate-200 rounded animate-pulse w-32 mb-4" />
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => <div key={i} className="h-4 bg-slate-200 rounded animate-pulse" />)}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
