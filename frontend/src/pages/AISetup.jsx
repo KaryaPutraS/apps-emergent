@@ -6,8 +6,15 @@ import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 
-const aiSetupChips = ['Coffee shop', 'FAQ dasar', 'Knowledge produk', 'Template broadcast', 'Atur AI Agent', 'Template lengkap'];
-const defaultMessages = [{ role: 'assistant', content: 'Halo! Saya bisa bantu menyiapkan data chatbot. Ceritakan bisnis Anda atau data apa yang ingin dimasukkan.' }];
+const aiSetupChips = [
+  { label: '☕ Coffee shop', prompt: 'Buatkan setup lengkap untuk bisnis coffee shop: rules greeting, menu, jam buka, knowledge FAQ, dan template pesan.' },
+  { label: '🛍️ Toko online', prompt: 'Buatkan setup lengkap untuk toko online: rules greeting, cara order, cek ongkir, knowledge produk, dan template follow-up.' },
+  { label: '🏥 Klinik / Kesehatan', prompt: 'Buatkan setup lengkap untuk klinik: rules greeting, jadwal dokter, cara daftar, knowledge layanan, dan template reminder.' },
+  { label: '🏨 Hotel / Penginapan', prompt: 'Buatkan setup lengkap untuk hotel: rules greeting, info kamar, cara booking, knowledge fasilitas, dan template konfirmasi.' },
+  { label: '📦 Data contoh kosong', prompt: 'Buatkan 3 rules dasar (greeting, info bisnis, penutup), 2 knowledge umum, dan 2 template pesan sebagai contoh data awal yang bisa saya edit sendiri.' },
+  { label: '🤖 Atur AI Agent', prompt: 'Bantu saya mengatur konfigurasi AI Agent: system prompt, informasi bisnis, temperatur AI, dan batasan token yang optimal.' },
+];
+const defaultMessages = [{ role: 'assistant', content: 'Halo! Saya bisa bantu menyiapkan data adminpintar.id. Pilih template bisnis di bawah atau ceritakan bisnis Anda untuk saya buatkan rules, knowledge, dan template secara otomatis.' }];
 
 const AISetup = () => {
   const [messages, setMessages] = useState(defaultMessages);
@@ -64,7 +71,7 @@ const AISetup = () => {
   };
 
   const handleChip = (chip) => {
-    setInput(`Buatkan setup untuk bisnis ${chip}`);
+    setInput(chip.prompt);
   };
 
   const handleClearChat = () => {
@@ -226,11 +233,11 @@ const AISetup = () => {
           <div className="flex flex-wrap gap-1.5 mb-3">
             {aiSetupChips.map((chip) => (
               <button
-                key={chip}
+                key={chip.label}
                 onClick={() => handleChip(chip)}
                 className="px-3 py-1 text-xs font-medium bg-emerald-50 text-emerald-700 rounded-full hover:bg-emerald-100 transition-colors"
               >
-                {chip}
+                {chip.label}
               </button>
             ))}
           </div>

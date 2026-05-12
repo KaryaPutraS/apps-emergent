@@ -3,7 +3,8 @@ import './App.css';
 import { Toaster } from './components/ui/sonner';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
-import { login as apiLogin, logout as apiLogout, checkSession, getToken, clearToken } from './api/apiClient';
+import { login as apiLogin, logout as apiLogout, checkSession, getToken, clearToken, getBranding } from './api/apiClient';
+import { applyBrandingToDocument } from './utils/branding';
 
 export const AppContext = createContext();
 
@@ -11,16 +12,34 @@ export const useApp = () => useContext(AppContext);
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [currentUser, setCurrentUser] = useState(null);
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('activeTab') || 'dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [checking, setChecking] = useState(true);
+  const [branding, setBranding] = useState({ siteName: 'adminpintar.id', faviconDataUrl: '', logoDataUrl: '' });
+
+  // Apply global branding (favicon + title) on app load
+  const refreshBranding = useCallback(() => {
+    return getBranding()
+      .then((data) => {
+        setBranding(data);
+        applyBrandingToDocument(data);
+        return data;
+      })
+      .catch(() => { /* ignore — keep default */ });
+  }, []);
+
+  useEffect(() => { refreshBranding(); }, [refreshBranding]);
 
   // Check existing session on mount
   useEffect(() => {
     const token = getToken();
     if (token) {
       checkSession()
-        .then(() => setIsLoggedIn(true))
+        .then((data) => {
+          setIsLoggedIn(true);
+          if (data.user) setCurrentUser(data.user);
+        })
         .catch(() => { clearToken(); })
         .finally(() => setChecking(false));
     } else {
@@ -28,11 +47,12 @@ function App() {
     }
   }, []);
 
-  const login = useCallback(async (password) => {
+  const login = useCallback(async (username, password) => {
     try {
-      const result = await apiLogin(password);
+      const result = await apiLogin(username, password);
       if (result.success) {
         setIsLoggedIn(true);
+        if (result.user) setCurrentUser(result.user);
       }
       return result;
     } catch (e) {
@@ -44,17 +64,23 @@ function App() {
     try { await apiLogout(); } catch (e) { /* ignore */ }
     clearToken();
     setIsLoggedIn(false);
+    setCurrentUser(null);
     setActiveTab('dashboard');
+    localStorage.removeItem('activeTab');
   }, []);
 
   const contextValue = {
     isLoggedIn,
+    currentUser,
+    setCurrentUser,
     activeTab,
-    setActiveTab,
+    setActiveTab: (tab) => { setActiveTab(tab); localStorage.setItem('activeTab', tab); },
     sidebarOpen,
     setSidebarOpen,
     login,
     logout,
+    branding,
+    refreshBranding,
   };
 
   if (checking) {

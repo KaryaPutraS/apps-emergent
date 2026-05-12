@@ -52,8 +52,8 @@ apiClient.interceptors.response.use(
 // AUTH
 // ============================================================
 
-export const login = async (password) => {
-  const { data } = await apiClient.post('/auth/login', { password });
+export const login = async (username, password) => {
+  const { data } = await apiClient.post('/auth/login', { username, password });
   if (data.success && data.token) {
     setToken(data.token);
   }
@@ -126,6 +126,52 @@ export const activateLicense = async (licenseKey) => {
 
 export const clearLicense = async () => {
   const { data } = await apiClient.delete('/license');
+  return data;
+};
+
+// ============================================================
+// USERS
+// ============================================================
+
+export const getUsers = async () => {
+  const { data } = await apiClient.get('/users');
+  return data;
+};
+
+export const getUserStats = async () => {
+  const { data } = await apiClient.get('/users/stats');
+  return data;
+};
+
+export const createUser = async (user) => {
+  const { data } = await apiClient.post('/users', user);
+  return data;
+};
+
+export const updateUser = async (userId, updates) => {
+  const { data } = await apiClient.put(`/users/${userId}`, updates);
+  return data;
+};
+
+export const deleteUser = async (userId) => {
+  const { data } = await apiClient.delete(`/users/${userId}`);
+  return data;
+};
+
+export const toggleUser = async (userId) => {
+  const { data } = await apiClient.put(`/users/${userId}/toggle`);
+  return data;
+};
+
+export const regenerateWebhookToken = async (userId) => {
+  const { data } = await apiClient.post(`/users/${userId}/regenerate-token`);
+  return data;
+};
+
+export const getAllUserActivity = async (userId = null, limit = 100) => {
+  const params = { limit };
+  if (userId) params.user_id = userId;
+  const { data } = await apiClient.get('/admin/user-activity', { params });
   return data;
 };
 
@@ -233,6 +279,11 @@ export const sendBroadcast = async (params) => {
   return data;
 };
 
+export const sendBroadcastOne = async (chatId, message) => {
+  const { data } = await apiClient.post('/broadcast/send-one', { chatId, message });
+  return data;
+};
+
 // ============================================================
 // LOGS
 // ============================================================
@@ -261,6 +312,84 @@ export const testFullFlow = async (message) => {
   return data;
 };
 
+export const testAI = async (message) => {
+  const { data } = await apiClient.post('/test/ai', { message });
+  return data;
+};
+
+// ============================================================
+// DOCUMENTATION
+// ============================================================
+
+export const getAllDocs = async () => {
+  const { data } = await apiClient.get('/docs');
+  return data;
+};
+
+export const getDoc = async (slug) => {
+  const { data } = await apiClient.get(`/docs/${slug}`);
+  return data;
+};
+
+export const updateDoc = async (slug, docPage) => {
+  const { data } = await apiClient.put(`/docs/${slug}`, docPage);
+  return data;
+};
+
+export const createDoc = async (slug, title) => {
+  const { data } = await apiClient.post('/docs', { slug, title });
+  return data;
+};
+
+export const deleteDoc = async (slug) => {
+  const { data } = await apiClient.delete(`/docs/${slug}`);
+  return data;
+};
+
+export const uploadDocImage = async (dataUrl) => {
+  const { data } = await apiClient.post('/docs/upload-image', { dataUrl });
+  return data;
+};
+
+// ============================================================
+// WAHA
+// ============================================================
+
+export const getWahaStatus = async () => {
+  const { data } = await apiClient.get('/waha/status');
+  return data;
+};
+
+export const getWahaQr = async () => {
+  const { data } = await apiClient.get('/waha/qr');
+  return data;
+};
+
+export const startWahaSession = async () => {
+  const { data } = await apiClient.post('/waha/start');
+  return data;
+};
+
+export const stopWahaSession = async () => {
+  const { data } = await apiClient.post('/waha/stop');
+  return data;
+};
+
+export const getWahaWebhook = async () => {
+  const { data } = await apiClient.get('/waha/webhook');
+  return data;
+};
+
+export const debugWaha = async () => {
+  const { data } = await apiClient.get('/waha/debug');
+  return data;
+};
+
+export const setWahaWebhook = async () => {
+  const { data } = await apiClient.post('/waha/webhook');
+  return data;
+};
+
 // ============================================================
 // RESET
 // ============================================================
@@ -285,13 +414,20 @@ export const resetContacts = async () => {
   return data;
 };
 
+export const resetLogs = async () => {
+  const { data } = await apiClient.post('/reset/logs');
+  return data;
+};
+
 // ============================================================
 // PASSWORD
 // ============================================================
 
 export const changePassword = async (currentPassword, newPassword, confirmPassword) => {
-  const { data } = await apiClient.post('/auth/change-password', null, {
-    params: { current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword }
+  const { data } = await apiClient.post('/auth/change-password', {
+    currentPassword,
+    newPassword,
+    confirmPassword,
   });
   if (data.token) setToken(data.token);
   return data;
@@ -305,5 +441,48 @@ export const aiSetupChat = async (message, history = []) => {
   const { data } = await apiClient.post('/ai-setup/chat', { message, history });
   return data;
 };
+
+// ============================================================
+// BRANDING (global)
+// ============================================================
+
+export const getBranding = async () => {
+  const { data } = await apiClient.get('/branding');
+  return data;
+};
+
+export const updateBranding = async (payload) => {
+  const { data } = await apiClient.put('/branding', payload);
+  return data;
+};
+
+// ============================================================
+// EXPORT
+// ============================================================
+
+const _downloadFile = async (url, filename) => {
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!response.ok) throw new Error('Export gagal');
+  const blob = await response.blob();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+};
+
+export const exportContacts = (fmt = 'csv') =>
+  _downloadFile(`${API_BASE}/export/contacts?fmt=${fmt}`, `contacts.${fmt}`);
+
+export const exportMessages = (fmt = 'csv') =>
+  _downloadFile(`${API_BASE}/export/messages?fmt=${fmt}`, `messages.${fmt}`);
+
+export const exportRules = () =>
+  _downloadFile(`${API_BASE}/export/rules?fmt=json`, 'rules.json');
+
+export const exportKnowledge = () =>
+  _downloadFile(`${API_BASE}/export/knowledge?fmt=json`, 'knowledge.json');
 
 export default apiClient;
