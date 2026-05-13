@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -1574,6 +1574,23 @@ async def add_log(log_type: str, message: str, user_id: str = ""):
         "userId": user_id,
     })
 
+# ── Realtime workflow event stream ──────────────────────────────────────────
+# One asyncio.Queue per user. SSE clients consume from their queue.
+_workflow_queues: dict[str, asyncio.Queue] = {}
+
+def _get_wf_queue(uid: str) -> asyncio.Queue:
+    if uid not in _workflow_queues:
+        _workflow_queues[uid] = asyncio.Queue(maxsize=200)
+    return _workflow_queues[uid]
+
+async def emit_workflow(uid: str, event_type: str, data: dict):
+    try:
+        q = _get_wf_queue(uid)
+        payload = {"type": event_type, "ts": datetime.utcnow().isoformat(), **data}
+        q.put_nowait(payload)
+    except (asyncio.QueueFull, Exception):
+        pass  # no active SSE listener — silently drop
+
 async def log_user_activity(user_id: str, username: str, action: str, detail: str = ""):
     await db.user_activity.insert_one({
         "userId": user_id,
@@ -1677,6 +1694,39 @@ async def test_ai(req: TestRequest, current_user: Dict = Depends(get_current_use
         "detail": reply,
         "meta": f"Provider: {provider} | Model: {model} | Tokens: {tokens} | Waktu: {elapsed}s",
     }
+
+@app.websocket("/ws/workflow")
+async def workflow_ws(websocket: WebSocket, token: str = ""):
+    # Authenticate via query parameter (WebSocket can't use custom headers easily)
+    if not token:
+        await websocket.close(code=4001)
+        return
+    session = await db.sessions.find_one({"token": token, "expires_at": {"$gt": datetime.utcnow()}})
+    if not session:
+        await websocket.close(code=4001)
+        return
+    uid = session["userId"]
+    await websocket.accept()
+    q = _get_wf_queue(uid)
+    # Drain stale events
+    while not q.empty():
+        try: q.get_nowait()
+        except Exception: break
+    # Send connected
+    try:
+        await websocket.send_json({"type": "connected", "ts": datetime.utcnow().isoformat()})
+    except Exception:
+        return
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(q.get(), timeout=20)
+                await websocket.send_json(event)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "heartbeat"})
+    except (WebSocketDisconnect, Exception):
+        pass
+
 
 # ============================================================
 # RESET
@@ -2112,6 +2162,7 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         return {"success": True, "processed": False, "reason": "outside_working_hours"}
 
     await add_log("MESSAGE_IN", f"[{user['username']}] Pesan dari {chat_id}: '{body[:80]}'", uid)
+    await emit_workflow(uid, "message_in", {"chat": chat_id, "preview": body[:60]})
 
     # Store incoming message
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -2357,6 +2408,7 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
     default_mode = cfg.get("defaultRuleResponseMode", "ai_context")  # direct / ai_polish / ai_context
 
     rules = await db.rules.find({"userId": uid, "isActive": True}, {"_id": 0}).sort("priority", 1).to_list(100)
+    await emit_workflow(uid, "rules_scan", {"count": len(rules)})
     rule_text = None   # teks dari rule yang cocok (sebelum diputuskan modenya)
     rule_matched_name = None
     for rule in rules:
@@ -2387,18 +2439,22 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                 reply_text = rule_text
                 response_type = "rule"
                 await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule_matched_name}' → mode=LANGSUNG, balasan dari rule", uid)
+                await emit_workflow(uid, "rule_match", {"name": rule_matched_name, "mode": "direct"})
             else:
                 await add_log("RULE_HIT", f"[{user['username']}] ✅ Rule COCOK: '{rule_matched_name}' → mode={rule_mode}, lanjut ke AI", uid)
+            await emit_workflow(uid, "rule_match", {"name": rule_matched_name, "mode": rule_mode})
             break
 
     if rule_text is None:
         await add_log("RULE_HIT", f"[{user['username']}] ❌ Tidak ada rule yang cocok dari {len(rules)} rule aktif — lanjut cek Knowledge Base", uid)
+        await emit_workflow(uid, "rule_no_match", {"count": len(rules)})
 
     # ── Step 2: Knowledge base context ───────────────────────
     knowledge_context = ""
     matched_items = []
     if not reply_text:
         items = await db.knowledge.find({"userId": uid, "isActive": True}, {"_id": 0}).to_list(100)
+        await emit_workflow(uid, "knowledge_scan", {"count": len(items)})
         for item in items:
             keywords = [k.strip().lower() for k in item.get("keyword", "").split("|") if k.strip()]
             if any(kw in msg_lower for kw in keywords):
@@ -2409,8 +2465,10 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
             )
             kb_names = ", ".join(f"'{i.get('category','?')}'" for i in matched_items[:3])
             await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ✅ Knowledge Base COCOK: {kb_names} — konteks dikirim ke AI", uid)
+            await emit_workflow(uid, "knowledge_match", {"categories": kb_names, "count": len(matched_items)})
         else:
             await add_log("KNOWLEDGE_MATCH", f"[{user['username']}] ❌ Tidak ada Knowledge Base yang cocok dari {len(items)} item aktif", uid)
+            await emit_workflow(uid, "knowledge_no_match", {"count": len(items)})
 
     # ── Step 3: AI call (atau fallback langsung jika mode=direct / AI tidak dikonfigurasi) ──
     provider = cfg.get("aiProvider", "").upper()
@@ -2523,12 +2581,14 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
                 kb_info = f" + KB ({len(matched_items)} item)" if knowledge_context else ""
                 rule_info = f" + Rule" if rule_text else ""
                 await add_log("AI_CALL", f"[{user['username']}] 🤖 AI dipanggil: {provider}/{model}{kb_info}{rule_info} | {len(ai_messages)} pesan riwayat", uid)
+                await emit_workflow(uid, "ai_call", {"provider": provider, "model": model, "has_kb": bool(knowledge_context), "has_rule": bool(rule_text)})
 
                 ai_reply, tokens_used = await call_ai(provider, model, ai_api_key, system_prompt, ai_messages, temperature, max_tokens, cfg.get("ollamaUrl", ""))
                 if ai_reply:
                     reply_text = ai_reply
                     response_type = "combo" if rule_text else "ai"
                     await add_log("AI_CALL", f"[{user['username']}] ✅ AI menjawab ({len(ai_reply)} karakter, {tokens_used} token)", uid)
+                    await emit_workflow(uid, "ai_response", {"chars": len(ai_reply), "tokens": tokens_used})
                 else:
                     await add_log("AI_ERROR", f"[{user['username']}] ⚠️ AI mengembalikan balasan kosong (provider={provider}, model={model}). Cek API key & kuota.", uid)
                     if rule_text:
@@ -2562,10 +2622,13 @@ async def _process_webhook_inner(user, uid, payload, msg_payload, chat_id, body,
         return {"success": True, "processed": False, "reason": "no_reply_generated"}
 
     # ── Step 4: Send reply via WAHA ──────────────────────────
+    await emit_workflow(uid, "reply_sending", {"chat": chat_id, "preview": reply_text[:60], "type": response_type})
     if waha_url:
         await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, reply_text)
+        await emit_workflow(uid, "reply_sent", {"chat": chat_id, "type": response_type})
     else:
         await add_log("WAHA_ERROR", f"[{user['username']}] WAHA URL kosong, balasan tidak terkirim!", uid)
+        await emit_workflow(uid, "reply_error", {"reason": "waha_url_empty"})
 
     # Store outgoing message with actual token count
     await db.messages.insert_one({

@@ -117,53 +117,50 @@ const WorkflowCanvas = ({ token }) => {
   useEffect(() => {
     if (!token) return;
     let active = true;
-    const ctrl = new AbortController();
+    let ws = null;
+    let retryTimer = null;
 
-    const connect = async () => {
+    const connect = () => {
+      if (!active) return;
+      // Build WebSocket URL — same host, ws(s) scheme
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const url = `${proto}://${window.location.host}/ws/workflow?token=${encodeURIComponent(token)}`;
       try {
-        const res = await fetch('/api/test/workflow-stream', {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: ctrl.signal,
-        });
-        if (!res.ok || !res.body) {
-          setConnected(false);
-          // Retry regardless of HTTP status — backend may not be ready yet
-          if (active) setTimeout(connect, 4000);
-          return;
-        }
-        setConnected(true);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        while (active) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() || '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const event = JSON.parse(line.slice(6));
-              if (event.type === 'heartbeat') continue;
-              if (event.type === 'connected') { setConnected(true); continue; }
-              pushEvent(event);
-              applyEvent(event, nodeStatesRef, setNodeStates, setActiveSegs, addParticle, setLastMsg);
-            } catch { /* skip */ }
-          }
-        }
-        // Stream ended — reconnect
-        if (active) { setConnected(false); setTimeout(connect, 2000); }
-      } catch (e) {
-        if (e.name !== 'AbortError') {
-          setConnected(false);
-          if (active) setTimeout(connect, 3000);
-        }
+        ws = new WebSocket(url);
+      } catch {
+        if (active) retryTimer = setTimeout(connect, 4000);
+        return;
       }
+
+      ws.onopen = () => setConnected(true);
+
+      ws.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data);
+          if (event.type === 'heartbeat' || event.type === 'connected') return;
+          pushEvent(event);
+          applyEvent(event, nodeStatesRef, setNodeStates, setActiveSegs, addParticle, setLastMsg);
+        } catch { /* skip */ }
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        if (active) retryTimer = setTimeout(connect, 3000);
+      };
+
+      ws.onerror = () => {
+        setConnected(false);
+        ws.close();
+      };
     };
 
     connect();
-    return () => { active = false; ctrl.abort(); setConnected(false); };
+    return () => {
+      active = false;
+      clearTimeout(retryTimer);
+      if (ws) ws.close();
+      setConnected(false);
+    };
   }, [token, addParticle, pushEvent]);
 
   const eventLabel = (e) => {
