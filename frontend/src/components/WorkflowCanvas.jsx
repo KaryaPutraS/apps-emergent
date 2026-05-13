@@ -125,7 +125,12 @@ const WorkflowCanvas = ({ token }) => {
           headers: { Authorization: `Bearer ${token}` },
           signal: ctrl.signal,
         });
-        if (!res.ok || !res.body) { setConnected(false); return; }
+        if (!res.ok || !res.body) {
+          setConnected(false);
+          // Retry regardless of HTTP status — backend may not be ready yet
+          if (active) setTimeout(connect, 4000);
+          return;
+        }
         setConnected(true);
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -140,12 +145,15 @@ const WorkflowCanvas = ({ token }) => {
             if (!line.startsWith('data: ')) continue;
             try {
               const event = JSON.parse(line.slice(6));
-              if (event.type === 'heartbeat' || event.type === 'connected') continue;
+              if (event.type === 'heartbeat') continue;
+              if (event.type === 'connected') { setConnected(true); continue; }
               pushEvent(event);
               applyEvent(event, nodeStatesRef, setNodeStates, setActiveSegs, addParticle, setLastMsg);
             } catch { /* skip */ }
           }
         }
+        // Stream ended — reconnect
+        if (active) { setConnected(false); setTimeout(connect, 2000); }
       } catch (e) {
         if (e.name !== 'AbortError') {
           setConnected(false);
