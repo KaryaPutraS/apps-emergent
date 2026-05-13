@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
 import { testRule, testKnowledge, testFullFlow, testAI } from '../api/apiClient';
-import { FlaskConical, Zap, BookOpen, Send, Plug, Brain, Loader2 } from 'lucide-react';
+import { FlaskConical, Zap, BookOpen, Send, Plug, Brain, Loader2, Activity } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Textarea } from '../components/ui/textarea';
 import { toast } from 'sonner';
+import WorkflowCanvas from '../components/WorkflowCanvas';
+
+const getToken = () => localStorage.getItem('chatbot_token') || null;
 
 const TestCenter = () => {
   const [message, setMessage] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeTest, setActiveTest] = useState(null);
+  const [showWorkflow, setShowWorkflow] = useState(true);
 
   const runTest = async (type) => {
     if (!message.trim() && type !== 'waha') {
@@ -50,10 +54,22 @@ const TestCenter = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Test Center</h1>
-        <p className="text-slate-500 text-sm mt-0.5">Tes koneksi, rule, knowledge, dan flow tanpa mengirim pesan nyata.</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Test Center</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Tes koneksi, rule, knowledge, dan flow tanpa mengirim pesan nyata.</p>
+        </div>
+        <Button
+          variant={showWorkflow ? 'default' : 'outline'}
+          onClick={() => setShowWorkflow(v => !v)}
+          className={showWorkflow ? 'gap-2 bg-slate-900 hover:bg-slate-800 text-white' : 'gap-2'}
+        >
+          <Activity className="w-4 h-4" />
+          {showWorkflow ? 'Sembunyikan Monitor' : 'Tampilkan Monitor'}
+        </Button>
       </div>
+
+      {showWorkflow && <WorkflowCanvas token={getToken()} />}
 
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
@@ -94,7 +110,7 @@ const TestCenter = () => {
         )}
 
         {result && !loading && (
-          <div className={`mt-4 rounded-lg border animate-fade-in ${statusColor[result.status] || 'bg-slate-50 border-slate-200'}`}>
+          <div className={`mt-4 rounded-lg border ${statusColor[result.status] || 'bg-slate-50 border-slate-200'}`}>
             <div className="px-4 pt-3 pb-1 flex items-center justify-between">
               <p className={`font-semibold text-sm ${textColor[result.status] || 'text-slate-700'}`}>{result.type}</p>
               {result.meta && <p className="text-[10px] text-slate-400 font-mono">{result.meta}</p>}
@@ -105,6 +121,10 @@ const TestCenter = () => {
           </div>
         )}
       </div>
+
+      <p className="text-xs text-slate-400 text-center">
+        Monitor Workflow menampilkan alur pesan <strong>realtime dari chat WhatsApp asli</strong> — bukan hanya simulasi tes. Cocok untuk live demo atau debugging.
+      </p>
     </div>
   );
 };
