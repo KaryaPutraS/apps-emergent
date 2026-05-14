@@ -2032,6 +2032,7 @@
   <script>
   (function() {
     var API_BASE = 'https://apps.adminpintar.id/api';
+    var DASHBOARD_URL = 'https://apps.adminpintar.id';
 
     window.openDemoModal = function() {
       document.getElementById('demo-form-view').style.display = '';
@@ -2097,7 +2098,7 @@
         // Auto-fill login URL with credentials in hash so login page can pre-fill
         var lk = document.getElementById('demo-login-link');
         if (lk && data.username && data.password) {
-          lk.href = '/#demo_login=' + encodeURIComponent(data.username) + ':' + encodeURIComponent(data.password);
+          lk.href = DASHBOARD_URL + '/#demo_login=' + encodeURIComponent(data.username) + ':' + encodeURIComponent(data.password);
         }
         document.getElementById('demo-form-view').style.display = 'none';
         document.getElementById('demo-success-view').style.display = '';

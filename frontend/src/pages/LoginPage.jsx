@@ -270,9 +270,20 @@ const LoginPage = () => {
         setUsername(u);
         setPassword(p);
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        // Auto-submit login after a brief delay (so user sees the fill animation)
+        setLoading(true);
+        setTimeout(async () => {
+          const result = await login(u, p);
+          setLoading(false);
+          if (result.success) {
+            toast.success(`Selamat datang! Akun demo berhasil masuk.`);
+          } else {
+            setError(result.message || 'Auto-login gagal. Silakan klik tombol Masuk.');
+          }
+        }, 400);
       } catch (_) {}
     }
-  }, []);
+  }, [login]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
