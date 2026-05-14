@@ -259,6 +259,21 @@ const LoginPage = () => {
       .catch(() => {/* default: show trial */});
   }, []);
 
+  // Auto-fill credentials from URL hash (#demo_login=user:pass) — sent by LP demo flow
+  useEffect(() => {
+    const hash = window.location.hash || '';
+    const m = hash.match(/^#demo_login=([^:]+):(.+)$/);
+    if (m) {
+      try {
+        const u = decodeURIComponent(m[1]);
+        const p = decodeURIComponent(m[2]);
+        setUsername(u);
+        setPassword(p);
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch (_) {}
+    }
+  }, []);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');

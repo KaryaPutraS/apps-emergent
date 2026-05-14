@@ -1823,7 +1823,318 @@
     </a>
   </div>
 
-  <!-- Scroll Reveal -->
+  <!-- ═══════════════════════════════════════════════════════
+       DEMO TRIAL MODAL — auto-create user + 14-day license
+       ═══════════════════════════════════════════════════════ -->
+  <style>
+    #demo-modal-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center;
+      padding: 1rem; animation: demoFadeIn 0.2s ease;
+    }
+    #demo-modal-overlay.show { display: flex; }
+    @keyframes demoFadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes demoSlideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .demo-modal {
+      background: #fff; border-radius: 20px; max-width: 460px; width: 100%;
+      max-height: 92vh; overflow-y: auto;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4);
+      animation: demoSlideUp 0.3s ease;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .demo-modal-header {
+      padding: 1.5rem 1.5rem 0.5rem; position: relative;
+    }
+    .demo-modal-close {
+      position: absolute; top: 1rem; right: 1rem;
+      width: 32px; height: 32px; border-radius: 50%;
+      border: none; background: #f1f5f9; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: #64748b; transition: all 0.15s;
+    }
+    .demo-modal-close:hover { background: #e2e8f0; color: #0f172a; }
+    .demo-modal-icon {
+      width: 56px; height: 56px; border-radius: 16px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1rem; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.35);
+      font-size: 28px;
+    }
+    .demo-modal h2 {
+      font-size: 1.4rem; font-weight: 700; color: #0f172a;
+      margin: 0 0 0.4rem 0;
+    }
+    .demo-modal p.sub {
+      color: #64748b; font-size: 0.9rem; margin: 0 0 1.2rem 0; line-height: 1.5;
+    }
+    .demo-modal-body { padding: 0 1.5rem 1.5rem; }
+    .demo-form-group { margin-bottom: 1rem; }
+    .demo-form-group label {
+      display: block; font-size: 0.85rem; font-weight: 600;
+      color: #334155; margin-bottom: 0.4rem;
+    }
+    .demo-form-group input {
+      width: 100%; padding: 0.7rem 0.9rem;
+      border: 1.5px solid #e2e8f0; border-radius: 10px;
+      font-size: 0.95rem; outline: none; transition: all 0.15s;
+      font-family: inherit; box-sizing: border-box;
+    }
+    .demo-form-group input:focus {
+      border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+    }
+    .demo-form-group .hint { font-size: 0.75rem; color: #94a3b8; margin-top: 0.3rem; }
+    .demo-btn-submit {
+      width: 100%; padding: 0.85rem; border: none; border-radius: 12px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+      transition: all 0.15s; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+      font-family: inherit;
+    }
+    .demo-btn-submit:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4); }
+    .demo-btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+    .demo-btn-spinner {
+      width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff; border-radius: 50%;
+      animation: demoSpin 0.8s linear infinite;
+    }
+    @keyframes demoSpin { to { transform: rotate(360deg); } }
+    .demo-error {
+      background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;
+      padding: 0.7rem 0.9rem; border-radius: 10px; font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    .demo-trust { display: flex; gap: 0.5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #f1f5f9; font-size: 0.8rem; color: #64748b; }
+    .demo-trust-item { flex: 1; display: flex; align-items: center; gap: 0.3rem; }
+
+    /* Success view */
+    .demo-success-icon {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: linear-gradient(135deg, #10b981, #059669);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 1rem; color: #fff; font-size: 36px;
+      box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+    }
+    .demo-cred-box {
+      background: #f8fafc; border: 1px solid #e2e8f0;
+      border-radius: 12px; padding: 1rem; margin-bottom: 0.7rem;
+    }
+    .demo-cred-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.3rem; font-weight: 600; }
+    .demo-cred-row { display: flex; align-items: center; gap: 0.5rem; }
+    .demo-cred-value {
+      flex: 1; font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 0.95rem; font-weight: 600; color: #0f172a;
+      word-break: break-all;
+    }
+    .demo-copy-btn {
+      padding: 0.4rem 0.7rem; border: 1px solid #e2e8f0;
+      border-radius: 8px; background: #fff; cursor: pointer;
+      font-size: 0.75rem; color: #475569; font-weight: 600;
+      transition: all 0.15s; font-family: inherit;
+    }
+    .demo-copy-btn:hover { border-color: #10b981; color: #059669; }
+    .demo-copy-btn.copied { background: #d1fae5; border-color: #10b981; color: #059669; }
+    .demo-info-box {
+      background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;
+      padding: 0.7rem 0.9rem; border-radius: 10px; font-size: 0.85rem;
+      margin: 0.7rem 0 1.2rem; display: flex; align-items: center; gap: 0.5rem;
+    }
+  </style>
+
+  <div id="demo-modal-overlay" role="dialog" aria-modal="true">
+    <div class="demo-modal" onclick="event.stopPropagation()">
+      <!-- Form view -->
+      <div id="demo-form-view">
+        <div class="demo-modal-header">
+          <button type="button" class="demo-modal-close" onclick="closeDemoModal()" aria-label="Tutup">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+          <div class="demo-modal-icon">🎁</div>
+          <h2>Coba Gratis 14 Hari</h2>
+          <p class="sub">Isi data Anda — akun & lisensi otomatis dibuat. Tidak perlu kartu kredit.</p>
+        </div>
+        <div class="demo-modal-body">
+          <div id="demo-error" class="demo-error" style="display:none;"></div>
+          <form id="demo-form" onsubmit="submitDemoForm(event)">
+            <div class="demo-form-group">
+              <label for="demo-name">Nama Lengkap <span style="color:#ef4444;">*</span></label>
+              <input type="text" id="demo-name" required placeholder="Contoh: Budi Santoso" autocomplete="name">
+            </div>
+            <div class="demo-form-group">
+              <label for="demo-phone">No. WhatsApp <span style="color:#ef4444;">*</span></label>
+              <input type="tel" id="demo-phone" required placeholder="08xx atau +62xx" autocomplete="tel">
+              <div class="hint">Untuk login & info lisensi</div>
+            </div>
+            <div class="demo-form-group">
+              <label for="demo-email">Email (opsional)</label>
+              <input type="email" id="demo-email" placeholder="email@domain.com" autocomplete="email">
+            </div>
+            <button type="submit" class="demo-btn-submit" id="demo-submit-btn">
+              <span id="demo-submit-label">🚀 Buat Akun Demo Sekarang</span>
+            </button>
+            <div class="demo-trust">
+              <div class="demo-trust-item">✓ 14 hari gratis</div>
+              <div class="demo-trust-item">✓ Tanpa kartu kredit</div>
+              <div class="demo-trust-item">✓ Akses penuh</div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Success view -->
+      <div id="demo-success-view" style="display:none;">
+        <div class="demo-modal-header">
+          <button type="button" class="demo-modal-close" onclick="closeDemoModal()" aria-label="Tutup">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+          <div style="text-align:center;">
+            <div class="demo-success-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>
+            <h2 style="text-align:center;">Akun Demo Berhasil Dibuat!</h2>
+            <p class="sub" style="text-align:center;">Simpan credentials ini — klik "Masuk Sekarang" untuk mulai pakai.</p>
+          </div>
+        </div>
+        <div class="demo-modal-body">
+          <div class="demo-cred-box">
+            <div class="demo-cred-label">Username</div>
+            <div class="demo-cred-row">
+              <div class="demo-cred-value" id="demo-result-username">-</div>
+              <button type="button" class="demo-copy-btn" onclick="copyDemo(this,'demo-result-username')">Salin</button>
+            </div>
+          </div>
+          <div class="demo-cred-box">
+            <div class="demo-cred-label">Password</div>
+            <div class="demo-cred-row">
+              <div class="demo-cred-value" id="demo-result-password">-</div>
+              <button type="button" class="demo-copy-btn" onclick="copyDemo(this,'demo-result-password')">Salin</button>
+            </div>
+          </div>
+          <div class="demo-cred-box">
+            <div class="demo-cred-label">License Key</div>
+            <div class="demo-cred-row">
+              <div class="demo-cred-value" id="demo-result-license" style="font-size:0.85rem;">-</div>
+              <button type="button" class="demo-copy-btn" onclick="copyDemo(this,'demo-result-license')">Salin</button>
+            </div>
+          </div>
+          <div class="demo-info-box">
+            ⏳ <span>Akun aktif sampai <strong id="demo-result-expires">-</strong></span>
+          </div>
+          <a id="demo-login-link" href="/" class="demo-btn-submit" style="text-decoration:none;">
+            Masuk Sekarang →
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    var API_BASE = 'https://apps.adminpintar.id/api';
+
+    window.openDemoModal = function() {
+      document.getElementById('demo-form-view').style.display = '';
+      document.getElementById('demo-success-view').style.display = 'none';
+      document.getElementById('demo-error').style.display = 'none';
+      document.getElementById('demo-modal-overlay').classList.add('show');
+      document.body.style.overflow = 'hidden';
+      setTimeout(function() { var n = document.getElementById('demo-name'); if (n) n.focus(); }, 100);
+    };
+
+    window.closeDemoModal = function() {
+      document.getElementById('demo-modal-overlay').classList.remove('show');
+      document.body.style.overflow = '';
+    };
+
+    window.copyDemo = function(btn, id) {
+      var t = document.getElementById(id).textContent;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(t).then(function() {
+          var orig = btn.textContent;
+          btn.textContent = '✓ Tersalin';
+          btn.classList.add('copied');
+          setTimeout(function() { btn.textContent = orig; btn.classList.remove('copied'); }, 1500);
+        });
+      }
+    };
+
+    window.submitDemoForm = function(e) {
+      e.preventDefault();
+      var name = document.getElementById('demo-name').value.trim();
+      var phone = document.getElementById('demo-phone').value.trim();
+      var email = document.getElementById('demo-email').value.trim();
+      var errEl = document.getElementById('demo-error');
+      var btn = document.getElementById('demo-submit-btn');
+      var lbl = document.getElementById('demo-submit-label');
+      errEl.style.display = 'none';
+      btn.disabled = true;
+      lbl.innerHTML = '<span class="demo-btn-spinner"></span> Membuat akun...';
+
+      fetch(API_BASE + '/public/demo-register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, phone: phone, email: email })
+      })
+      .then(function(r) {
+        return r.json().then(function(data) {
+          if (!r.ok) throw new Error(data.detail || 'Gagal membuat akun demo');
+          return data;
+        });
+      })
+      .then(function(data) {
+        document.getElementById('demo-result-username').textContent = data.username || '-';
+        document.getElementById('demo-result-password').textContent = data.password || '-';
+        document.getElementById('demo-result-license').textContent = data.license_key || '-';
+        var exp = data.expires_at || '';
+        if (exp) {
+          try {
+            var d = new Date(exp);
+            exp = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+          } catch (e) {}
+        }
+        document.getElementById('demo-result-expires').textContent = exp || '14 hari ke depan';
+        // Auto-fill login URL with credentials in hash so login page can pre-fill
+        var lk = document.getElementById('demo-login-link');
+        if (lk && data.username && data.password) {
+          lk.href = '/#demo_login=' + encodeURIComponent(data.username) + ':' + encodeURIComponent(data.password);
+        }
+        document.getElementById('demo-form-view').style.display = 'none';
+        document.getElementById('demo-success-view').style.display = '';
+      })
+      .catch(function(err) {
+        errEl.textContent = err.message || 'Gagal membuat akun demo. Coba lagi.';
+        errEl.style.display = '';
+      })
+      .finally(function() {
+        btn.disabled = false;
+        lbl.innerHTML = '🚀 Buat Akun Demo Sekarang';
+      });
+    };
+
+    // Intercept all .lp-activation-link clicks to open demo modal
+    document.addEventListener('DOMContentLoaded', function() {
+      document.body.addEventListener('click', function(e) {
+        var a = e.target.closest('.lp-activation-link');
+        if (a) {
+          e.preventDefault();
+          window.openDemoModal();
+        }
+      });
+
+      // Close modal on backdrop click
+      var ov = document.getElementById('demo-modal-overlay');
+      if (ov) ov.addEventListener('click', function(e) { if (e.target === ov) closeDemoModal(); });
+
+      // Close on Escape
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('demo-modal-overlay').classList.contains('show')) {
+          closeDemoModal();
+        }
+      });
+    });
+  })();
+  </script>
   <script>
     (function() {
       var els = document.querySelectorAll('.reveal');
