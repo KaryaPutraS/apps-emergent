@@ -122,7 +122,7 @@ const Layout = () => {
   const logoDataUrl = branding?.logoDataUrl || '';
 
   const navItems = isSuperAdmin ? superadminNavItems : userNavItems;
-  const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
+  const groups = isSuperAdmin ? ['main', 'lisensi'] : ['main', 'bot', 'data', 'tools', 'system'];
 
   // Superadmin can access user-management, branding, and docs; user never accesses these
   const superadminAllowed = ['user-management', 'activity-log', 'branding', 'lp-editor', 'lp-analytics', 'ai-setup-terpusat', 'chatbot-lisensi', 'waha-config', 'docs'];
