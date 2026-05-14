@@ -3365,6 +3365,447 @@ async def lp_analytics(days: int = 7, admin: Dict = Depends(require_superadmin))
     }
 
 # ============================================================
+# CENTRAL AI SETUP (Superadmin)
+# ============================================================
+
+AI_SETTINGS_KEY = "central_ai_settings"
+
+AI_SETTINGS_DEFAULTS = {
+    "provider": "GEMINI",
+    "model": "gemini-2.0-flash",
+    "api_key": "",
+    "base_url": "",
+    "temperature": 0.2,
+    "max_tokens": 1200,
+    "daily_token_limit": 50000,
+    "fallback_enabled": True,
+    "fallback_provider": "GEMINI",
+    "fallback_model": "gemini-2.0-flash",
+    "fallback_api_key": "",
+    "fallback_base_url": "",
+}
+
+AI_PROVIDERS = ["GEMINI", "OPENAI", "DEEPSEEK", "GROQ", "OPENROUTER", "OLLAMA"]
+
+async def get_ai_settings_doc() -> dict:
+    doc = await db.central_ai_settings.find_one({"_id": AI_SETTINGS_KEY})
+    if not doc:
+        return {**AI_SETTINGS_DEFAULTS}
+    out = {**AI_SETTINGS_DEFAULTS}
+    for k in AI_SETTINGS_DEFAULTS:
+        if k in doc:
+            out[k] = doc[k]
+    return out
+
+@api_router.get("/superadmin/ai-setup")
+async def get_central_ai_settings(admin: Dict = Depends(require_superadmin)):
+    settings = await get_ai_settings_doc()
+    return settings
+
+@api_router.put("/superadmin/ai-setup")
+async def update_central_ai_settings(body: dict, admin: Dict = Depends(require_superadmin)):
+    allowed = set(AI_SETTINGS_DEFAULTS.keys())
+    update_data: dict = {}
+    for k, v in body.items():
+        if k in allowed:
+            update_data[k] = v
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Tidak ada field valid untuk diupdate.")
+    await db.central_ai_settings.update_one(
+        {"_id": AI_SETTINGS_KEY},
+        {"$set": update_data},
+        upsert=True,
+    )
+    return {"success": True, "message": "Pengaturan AI terpusat berhasil disimpan."}
+
+@api_router.get("/superadmin/ai-usage")
+async def get_ai_usage_stats(days: int = 30, admin: Dict = Depends(require_superadmin)):
+    from datetime import timezone
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    pipeline_summary = [
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {
+            "_id": None,
+            "total_tokens": {"$sum": "$total_tokens"},
+            "total_requests": {"$sum": 1},
+            "prompt_tokens": {"$sum": "$prompt_tokens"},
+            "completion_tokens": {"$sum": "$completion_tokens"},
+        }}
+    ]
+    summary_docs = await db.ai_usage_logs.aggregate(pipeline_summary).to_list(1)
+    summary = summary_docs[0] if summary_docs else {"total_tokens": 0, "total_requests": 0, "prompt_tokens": 0, "completion_tokens": 0}
+    summary.pop("_id", None)
+
+    # Today stats
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_docs = await db.ai_usage_logs.aggregate([
+        {"$match": {"created_at": {"$gte": today_start}}},
+        {"$group": {"_id": None, "tokens": {"$sum": "$total_tokens"}, "requests": {"$sum": 1}}}
+    ]).to_list(1)
+    today = today_docs[0] if today_docs else {"tokens": 0, "requests": 0}
+    today.pop("_id", None)
+
+    # Per-license top usage
+    per_license = await db.ai_usage_logs.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": "$license_key", "tokens": {"$sum": "$total_tokens"}, "requests": {"$sum": 1}}},
+        {"$sort": {"tokens": -1}},
+        {"$limit": 20},
+    ]).to_list(20)
+    for d in per_license:
+        if "_id" in d:
+            d["license_key"] = d.pop("_id") or "-"
+
+    # Provider breakdown
+    by_provider = await db.ai_usage_logs.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": "$provider", "tokens": {"$sum": "$total_tokens"}, "requests": {"$sum": 1}}},
+        {"$sort": {"tokens": -1}},
+    ]).to_list(20)
+    for d in by_provider:
+        if "_id" in d:
+            d["provider"] = d.pop("_id") or "Unknown"
+
+    # Timeline (daily)
+    timeline = await db.ai_usage_logs.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}},
+            "tokens": {"$sum": "$total_tokens"},
+            "requests": {"$sum": 1},
+        }},
+        {"$sort": {"_id": 1}},
+    ]).to_list(100)
+    for d in timeline:
+        if "_id" in d:
+            d["date"] = d.pop("_id")
+
+    # Recent logs
+    recent_cursor = db.ai_usage_logs.find({}, {"_id": 0}).sort("created_at", -1).limit(50)
+    recent = await recent_cursor.to_list(50)
+    for r in recent:
+        if "created_at" in r and hasattr(r["created_at"], "isoformat"):
+            r["created_at"] = r["created_at"].isoformat()
+
+    return {
+        "summary": summary,
+        "today": today,
+        "per_license": per_license,
+        "by_provider": by_provider,
+        "timeline": timeline,
+        "recent": recent,
+    }
+
+# ============================================================
+# CHATBOT LISENSI (Superadmin)
+# ============================================================
+
+def _license_to_json(doc: dict) -> dict:
+    doc = {**doc}
+    doc.pop("_id", None)
+    if "created_at" in doc and hasattr(doc["created_at"], "isoformat"):
+        doc["created_at"] = doc["created_at"].isoformat()
+    if "updated_at" in doc and hasattr(doc["updated_at"], "isoformat"):
+        doc["updated_at"] = doc["updated_at"].isoformat()
+    if "expires_at" in doc and hasattr(doc["expires_at"], "isoformat"):
+        doc["expires_at"] = doc["expires_at"].isoformat()
+    return doc
+
+def _generate_license_key(product_code: str) -> str:
+    import secrets, string
+    chars = string.ascii_uppercase + string.digits
+    seg1 = ''.join(secrets.choice(chars) for _ in range(4))
+    seg2 = ''.join(secrets.choice(chars) for _ in range(4))
+    seg3 = ''.join(secrets.choice(chars) for _ in range(4))
+    prefix = (product_code[:4].upper() if product_code else "SATO")
+    return f"{prefix}-{seg1}-{seg2}-{seg3}"
+
+@api_router.get("/superadmin/licenses")
+async def list_chatbot_licenses(
+    page: int = 1,
+    limit: int = 20,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    admin: Dict = Depends(require_superadmin),
+):
+    query: dict = {}
+    if status:
+        query["status"] = status
+    if search:
+        query["$or"] = [
+            {"license_key": {"$regex": search, "$options": "i"}},
+            {"customer_name": {"$regex": search, "$options": "i"}},
+            {"customer_phone": {"$regex": search, "$options": "i"}},
+            {"customer_email": {"$regex": search, "$options": "i"}},
+        ]
+    skip = (page - 1) * limit
+    total = await db.chatbot_licenses.count_documents(query)
+    cursor = db.chatbot_licenses.find(query).sort("created_at", -1).skip(skip).limit(limit)
+    docs = await cursor.to_list(limit)
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "items": [_license_to_json(d) for d in docs],
+    }
+
+class ChatbotLicenseCreate(BaseModel):
+    product_code: str
+    customer_name: Optional[str] = ""
+    customer_phone: Optional[str] = ""
+    customer_email: Optional[str] = ""
+    plan_name: Optional[str] = "standard"
+    max_activations: Optional[int] = 1
+    expires_at: Optional[str] = None  # ISO date string or empty = no expiry
+    notes: Optional[str] = ""
+
+class ChatbotLicenseUpdate(BaseModel):
+    customer_name: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    plan_name: Optional[str] = None
+    status: Optional[str] = None
+    max_activations: Optional[int] = None
+    expires_at: Optional[str] = None
+    notes: Optional[str] = None
+
+@api_router.post("/superadmin/licenses")
+async def create_chatbot_license(req: ChatbotLicenseCreate, admin: Dict = Depends(require_superadmin)):
+    key = _generate_license_key(req.product_code)
+    # Ensure uniqueness
+    while await db.chatbot_licenses.find_one({"license_key": key}):
+        key = _generate_license_key(req.product_code)
+
+    expires_dt = None
+    if req.expires_at:
+        try:
+            expires_dt = datetime.fromisoformat(req.expires_at.replace("Z", "+00:00"))
+        except Exception:
+            pass
+
+    now = datetime.utcnow()
+    doc = {
+        "license_key": key,
+        "product_code": req.product_code,
+        "customer_name": req.customer_name or "",
+        "customer_phone": req.customer_phone or "",
+        "customer_email": req.customer_email or "",
+        "plan_name": req.plan_name or "standard",
+        "status": "active",
+        "max_activations": req.max_activations or 1,
+        "expires_at": expires_dt,
+        "notes": req.notes or "",
+        "created_at": now,
+        "updated_at": now,
+        "created_by": admin.get("username", ""),
+    }
+    await db.chatbot_licenses.insert_one(doc)
+    return {"success": True, "license_key": key, "data": _license_to_json(doc)}
+
+@api_router.get("/superadmin/licenses/{license_key}")
+async def get_chatbot_license(license_key: str, admin: Dict = Depends(require_superadmin)):
+    doc = await db.chatbot_licenses.find_one({"license_key": license_key.upper()})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Lisensi tidak ditemukan.")
+    return _license_to_json(doc)
+
+@api_router.put("/superadmin/licenses/{license_key}")
+async def update_chatbot_license(license_key: str, req: ChatbotLicenseUpdate, admin: Dict = Depends(require_superadmin)):
+    doc = await db.chatbot_licenses.find_one({"license_key": license_key.upper()})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Lisensi tidak ditemukan.")
+
+    update_fields: dict = {"updated_at": datetime.utcnow()}
+    if req.customer_name is not None:
+        update_fields["customer_name"] = req.customer_name
+    if req.customer_phone is not None:
+        update_fields["customer_phone"] = req.customer_phone
+    if req.customer_email is not None:
+        update_fields["customer_email"] = req.customer_email
+    if req.plan_name is not None:
+        update_fields["plan_name"] = req.plan_name
+    if req.status is not None:
+        allowed_statuses = {"active", "trial", "expired", "suspended"}
+        if req.status not in allowed_statuses:
+            raise HTTPException(status_code=400, detail=f"Status tidak valid. Pilihan: {allowed_statuses}")
+        update_fields["status"] = req.status
+    if req.max_activations is not None:
+        update_fields["max_activations"] = req.max_activations
+    if req.expires_at is not None:
+        if req.expires_at == "":
+            update_fields["expires_at"] = None
+        else:
+            try:
+                update_fields["expires_at"] = datetime.fromisoformat(req.expires_at.replace("Z", "+00:00"))
+            except Exception:
+                raise HTTPException(status_code=400, detail="Format tanggal tidak valid.")
+    if req.notes is not None:
+        update_fields["notes"] = req.notes
+
+    await db.chatbot_licenses.update_one({"license_key": license_key.upper()}, {"$set": update_fields})
+    updated = await db.chatbot_licenses.find_one({"license_key": license_key.upper()})
+    return {"success": True, "data": _license_to_json(updated)}
+
+@api_router.delete("/superadmin/licenses/{license_key}")
+async def delete_chatbot_license(license_key: str, admin: Dict = Depends(require_superadmin)):
+    result = await db.chatbot_licenses.delete_one({"license_key": license_key.upper()})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Lisensi tidak ditemukan.")
+    return {"success": True, "message": "Lisensi berhasil dihapus."}
+
+@api_router.post("/superadmin/licenses/{license_key}/send-waha")
+async def send_license_via_waha(license_key: str, admin: Dict = Depends(require_superadmin)):
+    doc = await db.chatbot_licenses.find_one({"license_key": license_key.upper()})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Lisensi tidak ditemukan.")
+
+    waha_cfg_doc = await db.waha_settings.find_one({"_id": "waha_config"})
+    if not waha_cfg_doc:
+        raise HTTPException(status_code=400, detail="Konfigurasi WAHA belum diatur.")
+
+    waha_url = (waha_cfg_doc.get("waha_url") or "").rstrip("/")
+    waha_session = waha_cfg_doc.get("waha_session") or "default"
+    waha_api_key = waha_cfg_doc.get("waha_api_key") or ""
+    template = waha_cfg_doc.get("license_message_template") or "{license_key}"
+
+    phone = (doc.get("customer_phone") or "").strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="Nomor HP customer belum diisi.")
+
+    # Normalize phone
+    phone_digits = ''.join(c for c in phone if c.isdigit())
+    if phone_digits.startswith("0"):
+        phone_digits = "62" + phone_digits[1:]
+    elif not phone_digits.startswith("62"):
+        phone_digits = "62" + phone_digits
+
+    expires_str = ""
+    if doc.get("expires_at"):
+        try:
+            expires_str = doc["expires_at"].strftime("%d %B %Y")
+        except Exception:
+            expires_str = str(doc["expires_at"])
+
+    message = template
+    replacements = {
+        "{customer_name}": doc.get("customer_name") or "-",
+        "{license_key}": doc.get("license_key") or "",
+        "{product_code}": doc.get("product_code") or "-",
+        "{plan_name}": doc.get("plan_name") or "standard",
+        "{expires_at}": expires_str or "Tidak ada expiry",
+        "{customer_phone}": phone,
+        "{customer_email}": doc.get("customer_email") or "-",
+    }
+    for placeholder, value in replacements.items():
+        message = message.replace(placeholder, value)
+
+    if not waha_url:
+        raise HTTPException(status_code=400, detail="WAHA URL belum diatur.")
+
+    import httpx
+    chat_id = f"{phone_digits}@c.us"
+    payload = {"session": waha_session, "chatId": chat_id, "text": message}
+    headers = {"Content-Type": "application/json"}
+    if waha_api_key:
+        headers["X-Api-Key"] = waha_api_key
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(f"{waha_url}/api/sendText", json=payload, headers=headers)
+        if resp.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"WAHA error {resp.status_code}: {resp.text[:200]}")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Gagal menghubungi WAHA: {exc}")
+
+    return {"success": True, "message": f"Lisensi berhasil dikirim ke {phone_digits}"}
+
+@api_router.get("/superadmin/license-stats")
+async def get_license_stats(admin: Dict = Depends(require_superadmin)):
+    total = await db.chatbot_licenses.count_documents({})
+    active = await db.chatbot_licenses.count_documents({"status": "active"})
+    trial = await db.chatbot_licenses.count_documents({"status": "trial"})
+    expired = await db.chatbot_licenses.count_documents({"status": "expired"})
+    suspended = await db.chatbot_licenses.count_documents({"status": "suspended"})
+    return {"total": total, "active": active, "trial": trial, "expired": expired, "suspended": suspended}
+
+# ============================================================
+# WAHA CONFIGURATION (Superadmin)
+# ============================================================
+
+WAHA_SETTINGS_DEFAULTS = {
+    "waha_url": "",
+    "waha_session": "default",
+    "waha_api_key": "",
+    "license_message_template": (
+        "Halo kak {customer_name}, berikut lisensi ChatBot Anda:\n\n"
+        "🔑 License Key:\n{license_key}\n\n"
+        "📦 Produk:\n{product_code}\n\n"
+        "💎 Plan:\n{plan_name}\n\n"
+        "📅 Berlaku hingga:\n{expires_at}\n\n"
+        "Silakan simpan license key ini dengan baik. Terima kasih 🙏"
+    ),
+}
+
+@api_router.get("/superadmin/waha-config")
+async def get_waha_config(admin: Dict = Depends(require_superadmin)):
+    doc = await db.waha_settings.find_one({"_id": "waha_config"})
+    out = {**WAHA_SETTINGS_DEFAULTS}
+    if doc:
+        for k in WAHA_SETTINGS_DEFAULTS:
+            if k in doc:
+                out[k] = doc[k]
+    return out
+
+@api_router.put("/superadmin/waha-config")
+async def update_waha_config(body: dict, admin: Dict = Depends(require_superadmin)):
+    allowed = set(WAHA_SETTINGS_DEFAULTS.keys())
+    update_data: dict = {}
+    for k, v in body.items():
+        if k in allowed:
+            update_data[k] = v
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Tidak ada field valid untuk diupdate.")
+    await db.waha_settings.update_one(
+        {"_id": "waha_config"},
+        {"$set": update_data},
+        upsert=True,
+    )
+    return {"success": True, "message": "Konfigurasi WAHA berhasil disimpan."}
+
+@api_router.post("/superadmin/waha-test")
+async def test_waha_connection(body: dict, admin: Dict = Depends(require_superadmin)):
+    waha_url = (body.get("waha_url") or "").rstrip("/")
+    waha_api_key = body.get("waha_api_key") or ""
+    waha_session = body.get("waha_session") or "default"
+    test_phone = body.get("test_phone") or ""
+
+    if not waha_url:
+        raise HTTPException(status_code=400, detail="WAHA URL wajib diisi.")
+
+    import httpx
+    headers = {"Content-Type": "application/json"}
+    if waha_api_key:
+        headers["X-Api-Key"] = waha_api_key
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Check session status
+            resp = await client.get(f"{waha_url}/api/sessions/{waha_session}", headers=headers)
+
+        if resp.status_code == 200:
+            session_data = resp.json()
+            status = session_data.get("status") or session_data.get("engine", {}).get("state") or "unknown"
+            return {"success": True, "message": f"Koneksi berhasil. Status session: {status}", "session": session_data}
+        elif resp.status_code == 401:
+            raise HTTPException(status_code=400, detail="API Key WAHA tidak valid.")
+        elif resp.status_code == 404:
+            return {"success": False, "message": f"Session '{waha_session}' tidak ditemukan di WAHA."}
+        else:
+            return {"success": False, "message": f"WAHA merespons dengan kode {resp.status_code}"}
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Gagal menghubungi WAHA: {exc}")
+
+# ============================================================
 # HEALTH CHECK
 # ============================================================
 
