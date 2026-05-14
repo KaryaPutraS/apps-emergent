@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AdminPintar.id — Asisten WhatsApp Otomatis untuk Bisnis Anda</title>
+  <meta name="description" content="Balas pesan pelanggan otomatis 24 jam via WhatsApp. Tanpa coding, langsung aktif dalam 5 menit. Mulai hanya Rp49.000/bulan." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green: #25D366;
+      --green-dark: #1ebe5d;
+      --green-deep: #128C7E;
+      --green-bg: #f0fdf4;
+      --ink: #0f172a;
+      --ink-2: #334155;
+      --ink-3: #64748b;
+      --border: #e2e8f0;
+      --bg: #ffffff;
+      --bg-2: #f8fafc;
+      --radius: 16px;
+      --shadow: 0 4px 24px rgba(0,0,0,.08);
+      --shadow-lg: 0 8px 40px rgba(0,0,0,.12);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Promo Bar ── */
+    .promo-bar {
+      background: linear-gradient(90deg, #128C7E 0%, #25D366 100%);
+      color: #fff;
+      text-align: center;
+      padding: 10px 16px;
+      font-size: .85rem;
+      font-weight: 600;
+      letter-spacing: .01em;
+    }
+    .promo-bar a { color: #fff; text-decoration: underline; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255,255,255,.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .nav-logo {
+      font-size: 1.2rem;
+      font-weight: 800;
+      color: var(--ink);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-logo-dot { color: var(--green); }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      list-style: none;
+    }
+    .nav-links a {
+      font-size: .9rem;
+      font-weight: 500;
+      color: var(--ink-2);
+      text-decoration: none;
+      transition: color .2s;
+    }
+    .nav-links a:hover { color: var(--green-deep); }
+    .nav-cta {
+      background: var(--green);
+      color: #fff !important;
+      padding: 8px 20px;
+      border-radius: 50px;
+      font-weight: 700 !important;
+      transition: background .2s !important;
+    }
+    .nav-cta:hover { background: var(--green-dark) !important; }
+    @media (max-width: 767px) {
+      .nav-links { display: none; }
+    }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--green);
+      color: #fff;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 14px 28px;
+      border-radius: 50px;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: background .2s, transform .15s, box-shadow .2s;
+      box-shadow: 0 4px 16px rgba(37,211,102,.35);
+    }
+    .btn-primary:hover {
+      background: var(--green-dark);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(37,211,102,.45);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      color: var(--ink-2);
+      font-weight: 600;
+      font-size: .95rem;
+      padding: 13px 24px;
+      border-radius: 50px;
+      text-decoration: none;
+      border: 1.5px solid var(--border);
+      transition: border-color .2s, color .2s;
+    }
+    .btn-secondary:hover { border-color: var(--green); color: var(--green-deep); }
+
+    /* ── Section Wrapper ── */
+    .section { padding: 80px 24px; }
+    .section-inner { max-width: 1120px; margin: 0 auto; }
+    .section-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--green-bg);
+      color: var(--green-deep);
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 50px;
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: clamp(1.6rem, 3vw, 2.4rem);
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+    .section-sub {
+      font-size: 1.05rem;
+      color: var(--ink-3);
+      max-width: 580px;
+    }
+    .highlight { color: var(--green-deep); }
+    .text-center { text-align: center; }
+    .mx-auto { margin-left: auto; margin-right: auto; }
+
+    /* ── Hero ── */
+    .hero {
+      background: linear-gradient(160deg, #f0fdf4 0%, #ffffff 60%);
+      padding: 72px 24px 80px;
+    }
+    .hero-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+    @media (max-width: 900px) {
+      .hero-inner { grid-template-columns: 1fr; gap: 40px; }
+    }
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--green-bg);
+      color: var(--green-deep);
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 50px;
+      margin-bottom: 20px;
+    }
+    .hero-headline {
+      font-size: clamp(2rem, 4.5vw, 3.4rem);
+      font-weight: 800;
+      line-height: 1.12;
+      letter-spacing: -.02em;
+      margin-bottom: 20px;
+    }
+    .hero-headline .line { display: block; }
+    .hero-headline .line.accent { color: var(--green-deep); }
+    .hero-sub {
+      font-size: 1.1rem;
+      color: var(--ink-2);
+      line-height: 1.65;
+      margin-bottom: 32px;
+      max-width: 480px;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .hero-trust {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: .82rem;
+      color: var(--ink-3);
+    }
+    .trust-avatars {
+      display: flex;
+    }
+    .trust-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--green);
+      border: 2px solid #fff;
+      margin-left: -8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .65rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .trust-avatar:first-child { margin-left: 0; }
+    /* Hero Card */
+    .hero-card {
+      background: #fff;
+      border-radius: 24px;
+      box-shadow: var(--shadow-lg);
+      padding: 32px;
+      border: 1px solid var(--border);
+    }
+    .hero-card-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #fff3cd;
+      color: #92400e;
+      font-size: .75rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 50px;
+      margin-bottom: 20px;
+    }
+    .hero-card-price {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .hero-card-price .currency { font-size: 1.1rem; font-weight: 700; color: var(--ink-3); }
+    .hero-card-price .amount { font-size: 3.2rem; font-weight: 800; line-height: 1; }
+    .hero-card-price .period { font-size: .9rem; color: var(--ink-3); }
+    .hero-card-price-old {
+      font-size: .82rem;
+      color: var(--ink-3);
+      margin-bottom: 20px;
+    }
+    .hero-card-features {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .hero-card-feature {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: .9rem;
+      font-weight: 500;
+    }
+    .hero-card-feature svg {
+      width: 18px;
+      height: 18px;
+      color: var(--green);
+      flex-shrink: 0;
+    }
+    .hero-card-note {
+      text-align: center;
+      font-size: .78rem;
+      color: var(--ink-3);
+      margin-top: 12px;
+    }
+
+    /* ── Problems ── */
+    .problems { background: var(--ink); }
+    .problems .section-title { color: #fff; }
+    .problems .section-sub { color: #94a3b8; }
+    .problems .section-tag { background: rgba(255,255,255,.08); color: #94a3b8; }
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-top: 48px;
+    }
+    .problem-card {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+    }
+    .problem-icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+    .problem-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    .problem-card p {
+      font-size: .87rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+
+    /* ── Pillars ── */
+    .pillars { background: var(--bg-2); }
+    .pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .pillar-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      transition: transform .2s, box-shadow .2s;
+    }
+    .pillar-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+    .pillar-num {
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--green-deep);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+    .pillar-card h3 {
+      font-size: 1.15rem;
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+    .pillar-card p {
+      font-size: .9rem;
+      color: var(--ink-3);
+      line-height: 1.55;
+    }
+
+    /* ── Features ── */
+    .features-list {
+      display: flex;
+      flex-direction: column;
+      gap: 64px;
+      margin-top: 56px;
+    }
+    .feature-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+    .feature-row.reverse { direction: rtl; }
+    .feature-row.reverse > * { direction: ltr; }
+    @media (max-width: 767px) {
+      .feature-row { grid-template-columns: 1fr; direction: ltr; }
+      .feature-row.reverse > * { direction: ltr; }
+    }
+    .feature-visual {
+      background: var(--green-bg);
+      border-radius: 20px;
+      min-height: 280px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 4rem;
+    }
+    .feature-content h3 {
+      font-size: 1.4rem;
+      font-weight: 800;
+      margin-bottom: 12px;
+      line-height: 1.25;
+    }
+    .feature-content p {
+      font-size: .95rem;
+      color: var(--ink-2);
+      line-height: 1.65;
+      margin-bottom: 20px;
+    }
+    .feature-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .feature-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: .9rem;
+      font-weight: 500;
+    }
+    .feature-list li::before {
+      content: '✓';
+      color: var(--green);
+      font-weight: 800;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* ── Flow ── */
+    .flow { background: var(--bg-2); }
+    .flow-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0;
+      margin-top: 48px;
+      position: relative;
+    }
+    .flow-step {
+      text-align: center;
+      padding: 32px 20px;
+      position: relative;
+    }
+    .flow-step:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 1.4rem;
+      color: var(--green);
+    }
+    @media (max-width: 767px) {
+      .flow-step:not(:last-child)::after { display: none; }
+    }
+    .flow-num {
+      width: 52px;
+      height: 52px;
+      background: var(--green);
+      color: #fff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      font-weight: 800;
+      margin: 0 auto 16px;
+    }
+    .flow-step h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .flow-step p {
+      font-size: .85rem;
+      color: var(--ink-3);
+      line-height: 1.5;
+    }
+
+    /* ── Use Cases ── */
+    .use-cases-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 48px;
+    }
+    .use-case-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 20px;
+      transition: border-color .2s, transform .2s;
+    }
+    .use-case-card:hover { border-color: var(--green); transform: translateY(-3px); }
+    .use-case-icon { font-size: 2rem; margin-bottom: 10px; }
+    .use-case-card h3 { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
+    .use-case-card p { font-size: .82rem; color: var(--ink-3); line-height: 1.5; }
+
+    /* ── Pricing ── */
+    .pricing { background: var(--bg-2); }
+    .price-card {
+      background: #fff;
+      border: 2px solid var(--green);
+      border-radius: 24px;
+      padding: 40px 36px;
+      max-width: 520px;
+      margin: 48px auto 0;
+      box-shadow: 0 8px 48px rgba(37,211,102,.15);
+    }
+    .price-card-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--green);
+      color: #fff;
+      font-size: .75rem;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 50px;
+      margin-bottom: 24px;
+    }
+    .price-card-price {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .price-card-price .currency { font-size: 1.2rem; font-weight: 700; color: var(--ink-3); margin-top: 8px; }
+    .price-card-price .number { font-size: 3.6rem; font-weight: 800; line-height: 1; }
+    .price-card-price .per { font-size: .9rem; color: var(--ink-3); }
+    .price-card-strike-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+      font-size: .85rem;
+      color: var(--ink-3);
+    }
+    .strike { text-decoration: line-through; }
+    .badge-discount {
+      background: #fee2e2;
+      color: #b91c1c;
+      font-size: .72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 50px;
+    }
+    .price-card-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .price-card-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: .95rem;
+      font-weight: 500;
+    }
+    .price-card-list li svg {
+      width: 18px;
+      height: 18px;
+      color: var(--green);
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .price-card-note {
+      text-align: center;
+      font-size: .8rem;
+      color: var(--ink-3);
+      margin-top: 16px;
+    }
+
+    /* ── FAQ ── */
+    .faq {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 48px;
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .faq-item {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .faq-q {
+      padding: 18px 24px;
+      font-weight: 700;
+      font-size: .95rem;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .faq-q::-webkit-details-marker { display: none; }
+    .faq-q::after {
+      content: '+';
+      font-size: 1.4rem;
+      color: var(--green);
+      flex-shrink: 0;
+      transition: transform .2s;
+    }
+    details[open] .faq-q::after { transform: rotate(45deg); }
+    .faq-a {
+      padding: 0 24px 18px;
+      font-size: .9rem;
+      color: var(--ink-2);
+      line-height: 1.65;
+    }
+
+    /* ── Final CTA ── */
+    .final-cta {
+      background: linear-gradient(135deg, #128C7E 0%, #25D366 100%);
+      color: #fff;
+      text-align: center;
+    }
+    .final-cta h2 {
+      font-size: clamp(1.8rem, 4vw, 3rem);
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+    .final-p {
+      font-size: 1.05rem;
+      opacity: .88;
+      max-width: 520px;
+      margin: 0 auto 36px;
+    }
+    .final-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      justify-content: center;
+    }
+    .final-cta .btn-primary {
+      background: #fff;
+      color: var(--green-deep);
+      box-shadow: 0 4px 16px rgba(0,0,0,.15);
+    }
+    .final-cta .btn-primary:hover { background: #f0fdf4; }
+    .final-cta .btn-secondary {
+      border-color: rgba(255,255,255,.5);
+      color: #fff;
+    }
+    .final-cta .btn-secondary:hover { border-color: #fff; }
+
+    /* ── Footer ── */
+    footer {
+      background: var(--ink);
+      color: #94a3b8;
+      padding: 48px 24px;
+    }
+    .footer-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.5fr 1fr 1fr 1fr;
+      gap: 40px;
+    }
+    @media (max-width: 767px) {
+      .footer-inner { grid-template-columns: 1fr 1fr; }
+    }
+    .footer-brand .nav-logo { color: #fff; margin-bottom: 12px; display: inline-flex; }
+    .footer-brand p { font-size: .85rem; line-height: 1.6; }
+    .footer-col h4 {
+      font-size: .85rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 14px;
+    }
+    .footer-col a {
+      display: block;
+      font-size: .85rem;
+      color: #94a3b8;
+      text-decoration: none;
+      margin-bottom: 8px;
+      transition: color .2s;
+    }
+    .footer-col a:hover { color: var(--green); }
+    .footer-bottom {
+      max-width: 1120px;
+      margin: 32px auto 0;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,.08);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: .8rem;
+    }
+
+    /* ── Sticky Mobile CTA ── */
+    .sticky-cta-bar {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 200;
+      padding: 12px 16px;
+      background: rgba(255,255,255,.96);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+    }
+    @media (max-width: 767px) {
+      .sticky-cta-bar { display: block; }
+    }
+    .sticky-cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--green);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 14px;
+      padding: 13px 20px;
+      font-weight: 700;
+    }
+    .sticky-cta-label { font-size: .82rem; opacity: .85; }
+    .sticky-cta-main { font-size: 1rem; font-weight: 800; }
+    .sticky-cta-price { font-size: .85rem; background: rgba(255,255,255,.2); padding: 3px 10px; border-radius: 50px; }
+
+    /* ── Reveal ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity .55s ease, transform .55s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Misc ── */
+    .wa-icon {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff'%3E%3Cpath d='M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-size: contain;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Promo Bar -->
+  <div class="promo-bar">
+    <span id="lp-promo-text">🔥 Promo Peluncuran: Gratis 14 hari trial + setup gratis senilai Rp150.000 — <a href="#">Klaim sekarang →</a></span>
+  </div>
+
+  <!-- Nav -->
+  <nav>
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">AdminPintar<span class="nav-logo-dot">.id</span></a>
+      <ul class="nav-links">
+        <li><a href="#fitur">Fitur</a></li>
+        <li><a href="#harga">Harga</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li><a href="#" class="nav-cta lp-activation-link">Mulai Gratis</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-inner">
+      <!-- Left: Copy -->
+      <div class="hero-copy">
+        <div class="hero-eyebrow">✦ WhatsApp Business Automation</div>
+        <h1 class="hero-headline">
+          <span class="line" id="lp-hero-line-1">Jawab Pelanggan</span>
+          <span class="line accent" id="lp-hero-line-2">Otomatis 24 Jam</span>
+          <span class="line" id="lp-hero-line-3">Tanpa Karyawan Tambahan</span>
+        </h1>
+        <p class="hero-sub" id="lp-hero-sub">Chatbot WhatsApp pintar untuk bisnis Anda. Setup 5 menit, langsung aktif. Tidak perlu coding, tidak perlu IT.</p>
+        <div class="hero-actions">
+          <a href="#" class="btn-primary lp-activation-link">
+            <span class="wa-icon"></span><span id="lp-hero-cta-primary">Coba Gratis 14 Hari</span>
+          </a>
+          <a href="#" class="btn-secondary lp-wa-link">💬 Chat via WhatsApp</a>
+        </div>
+        <div class="hero-trust">
+          <div class="trust-avatars">
+            <div class="trust-avatar">RD</div>
+            <div class="trust-avatar">SA</div>
+            <div class="trust-avatar">BW</div>
+            <div class="trust-avatar">+</div>
+          </div>
+          <span>Dipercaya 500+ UMKM Indonesia</span>
+        </div>
+      </div>
+      <!-- Right: Card -->
+      <div class="hero-card reveal">
+        <div class="hero-card-badge">⚡ Aktif sekarang, bayar nanti</div>
+        <div class="hero-card-price">
+          <span class="currency">Rp</span>
+          <span class="amount"><span id="lp-hero-price-amount">49</span></span>
+          <span class="period" id="lp-hero-price-period">.000/bulan</span>
+        </div>
+        <div class="hero-card-price-old" id="lp-hero-price-old">
+          <span style="text-decoration:line-through">Rp 99.000</span> · Hemat 50%
+        </div>
+        <div class="hero-card-features" id="lp-hero-features">
+          <div class="hero-card-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Balas pesan otomatis 24/7
+          </div>
+          <div class="hero-card-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Katalog produk interaktif
+          </div>
+          <div class="hero-card-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Broadcast promo ke ribuan kontak
+          </div>
+          <div class="hero-card-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Laporan & analitik lengkap
+          </div>
+          <div class="hero-card-feature">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Multi-agen dalam satu nomor
+          </div>
+        </div>
+        <a href="#" class="btn-primary lp-activation-link" style="width:100%;justify-content:center;">
+          <span class="wa-icon"></span> Mulai Gratis 14 Hari
+        </a>
+        <p class="hero-card-note">Tidak perlu kartu kredit · Batalkan kapan saja</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Problems -->
+  <section class="section problems">
+    <div class="section-inner">
+      <div class="section-tag">😤 Masalah Nyata UMKM</div>
+      <h2 class="section-title">Apakah ini terjadi<br>di bisnis Anda?</h2>
+      <p class="section-sub" style="color:#94a3b8">Setiap hari ribuan UMKM kehilangan pelanggan karena hal-hal yang sebenarnya bisa diotomasi.</p>
+      <div class="problem-grid">
+        <div class="problem-card reveal">
+          <div class="problem-icon">😩</div>
+          <h3>Chat numpuk, tidak sempat balas</h3>
+          <p>Ratusan pesan masuk setiap hari. Tim kewalahan, pelanggan menunggu, order terlewat.</p>
+        </div>
+        <div class="problem-card reveal">
+          <div class="problem-icon">🌙</div>
+          <h3>Bisnis tutup, pelanggan kabur</h3>
+          <p>Pelanggan tanya jam 11 malam, tidak ada yang jawab. Besoknya mereka sudah beli di tempat lain.</p>
+        </div>
+        <div class="problem-card reveal">
+          <div class="problem-icon">🔄</div>
+          <h3>Jawab pertanyaan yang sama berulang</h3>
+          <p>"Harga berapa?" "Ada ukuran L?" "Ongkirnya berapa?" — dijawab manual ratusan kali sehari.</p>
+        </div>
+        <div class="problem-card reveal">
+          <div class="problem-icon">📉</div>
+          <h3>Promo tidak sampai ke pelanggan</h3>
+          <p>Susah payah buat promo, tapi cara broadcast masih manual satu per satu. Ribet dan lama.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pillars -->
+  <section class="section pillars">
+    <div class="section-inner">
+      <div class="section-tag">✦ Solusi Kami</div>
+      <h2 class="section-title">Satu platform,<br>semua masalah <span class="highlight">beres</span></h2>
+      <p class="section-sub">AdminPintar hadir sebagai asisten virtual WhatsApp yang bekerja tanpa henti untuk bisnis Anda.</p>
+      <div class="pillars-grid">
+        <div class="pillar-card reveal">
+          <div class="pillar-num">01 — Otomatis</div>
+          <h3>Balas pesan tanpa perlu online</h3>
+          <p>Chatbot cerdas menjawab pertanyaan pelanggan 24 jam sehari, 7 hari seminggu — termasuk saat Anda tidur.</p>
+        </div>
+        <div class="pillar-card reveal">
+          <div class="pillar-num">02 — Cerdas</div>
+          <h3>Pahami maksud pelanggan</h3>
+          <p>Bukan sekadar keyword, AI kami mengerti konteks percakapan dan memberikan jawaban yang relevan.</p>
+        </div>
+        <div class="pillar-card reveal">
+          <div class="pillar-num">03 — Mudah</div>
+          <h3>Setup 5 menit, langsung jalan</h3>
+          <p>Tidak perlu coding, tidak perlu IT. Daftar, hubungkan WhatsApp, atur konten — selesai.</p>
+        </div>
+        <div class="pillar-card reveal">
+          <div class="pillar-num">04 — Terjangkau</div>
+          <h3>Mulai dari Rp49.000/bulan</h3>
+          <p>Lebih murah dari gaji satu karyawan paruh waktu, tapi bekerja 10x lebih keras dan tidak pernah istirahat.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="fitur">
+    <div class="section-inner">
+      <div class="section-tag">⚡ Fitur Unggulan</div>
+      <h2 class="section-title">Semua yang Anda butuhkan<br>ada di sini</h2>
+      <div class="features-list">
+
+        <div class="feature-row reveal">
+          <div class="feature-visual">🤖</div>
+          <div class="feature-content">
+            <h3>Auto-reply Cerdas berbasis AI</h3>
+            <p>Jawab pertanyaan pelanggan secara otomatis dengan respons yang natural dan relevan. Tidak terasa seperti bot.</p>
+            <ul class="feature-list">
+              <li>Respons instan dalam hitungan detik</li>
+              <li>Memahami bahasa Indonesia sehari-hari</li>
+              <li>Bisa dikustomisasi sesuai gaya bicara brand</li>
+              <li>Escalate ke agen manusia bila diperlukan</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="feature-row reverse reveal">
+          <div class="feature-visual">📦</div>
+          <div class="feature-content">
+            <h3>Katalog Produk Interaktif</h3>
+            <p>Pelanggan bisa browse produk, cek stok, dan langsung order — semua dalam satu percakapan WhatsApp.</p>
+            <ul class="feature-list">
+              <li>Tampilkan produk dengan foto & harga</li>
+              <li>Cek ketersediaan stok real-time</li>
+              <li>Proses order langsung via chat</li>
+              <li>Integrasi dengan toko online Anda</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="feature-row reveal">
+          <div class="feature-visual">📣</div>
+          <div class="feature-content">
+            <h3>Broadcast & Kampanye Promo</h3>
+            <p>Kirim pesan promosi ke ribuan pelanggan sekaligus dengan tingkat buka pesan hingga 98%.</p>
+            <ul class="feature-list">
+              <li>Segmentasi pelanggan berdasarkan perilaku</li>
+              <li>Template pesan yang bisa dipersonalisasi</li>
+              <li>Jadwalkan pengiriman di waktu terbaik</li>
+              <li>Laporan open rate & click rate</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="feature-row reverse reveal">
+          <div class="feature-visual">📊</div>
+          <div class="feature-content">
+            <h3>Dashboard & Analitik Lengkap</h3>
+            <p>Pantau performa bisnis Anda dari satu dashboard yang mudah dipahami.</p>
+            <ul class="feature-list">
+              <li>Jumlah pesan masuk & terselesaikan</li>
+              <li>Waktu respons rata-rata</li>
+              <li>Produk paling banyak ditanyakan</li>
+              <li>Laporan harian, mingguan, bulanan</li>
+            </ul>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Flow / How it Works -->
+  <section class="section flow">
+    <div class="section-inner text-center">
+      <div class="section-tag mx-auto">🚀 Cara Kerja</div>
+      <h2 class="section-title">Aktif dalam 4 langkah mudah</h2>
+      <p class="section-sub mx-auto">Dari daftar sampai chatbot aktif melayani pelanggan, hanya butuh 5 menit.</p>
+      <div class="flow-steps">
+        <div class="flow-step reveal">
+          <div class="flow-num">1</div>
+          <h3>Daftar Akun</h3>
+          <p>Isi form singkat, verifikasi email. Gratis, tanpa kartu kredit.</p>
+        </div>
+        <div class="flow-step reveal">
+          <div class="flow-num">2</div>
+          <h3>Hubungkan WhatsApp</h3>
+          <p>Scan QR code dengan WhatsApp Business Anda. Selesai dalam 30 detik.</p>
+        </div>
+        <div class="flow-step reveal">
+          <div class="flow-num">3</div>
+          <h3>Atur Konten</h3>
+          <p>Masukkan info produk, FAQ, jam operasional. Template siap pakai tersedia.</p>
+        </div>
+        <div class="flow-step reveal">
+          <div class="flow-num">4</div>
+          <h3>Langsung Aktif!</h3>
+          <p>Chatbot Anda siap melayani pelanggan 24 jam. Anda tinggal pantau dashboard.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Use Cases -->
+  <section class="section">
+    <div class="section-inner">
+      <div class="section-tag">🏪 Untuk Siapa?</div>
+      <h2 class="section-title">Cocok untuk semua<br>jenis bisnis</h2>
+      <p class="section-sub">Dari kuliner hingga fashion, dari jasa hingga pendidikan — AdminPintar beradaptasi dengan bisnis Anda.</p>
+      <div class="use-cases-grid">
+        <div class="use-case-card reveal">
+          <div class="use-case-icon">🍜</div>
+          <h3>Kuliner & F&B</h3>
+          <p>Terima order, informasi menu, jam buka, dan promo harian otomatis.</p>
+        </div>
+        <div class="use-case-card reveal">
+          <div class="use-case-icon">👗</div>
+          <h3>Fashion & Retail</h3>
+          <p>Cek stok, ukuran, warna, dan proses pemesanan tanpa ribet.</p>
+        </div>
+        <div class="use-case-card reveal">
+          <div class="use-case-icon">💆</div>
+          <h3>Salon & Kecantikan</h3>
+          <p>Booking jadwal, info layanan, konfirmasi appointment otomatis.</p>
+        </div>
+        <div class="use-case-card reveal">
+          <div class="use-case-icon">🏠</div>
+          <h3>Properti & Sewa</h3>
+          <p>Informasi unit, harga, ketersediaan, dan jadwal survey.</p>
+        </div>
+        <div class="use-case-card reveal">
+          <div class="use-case-icon">📚</div>
+          <h3>Pendidikan & Kursus</h3>
+          <p>Info program, daftar siswa, pengumuman, dan reminder otomatis.</p>
+        </div>
+        <div class="use-case-card reveal">
+          <div class="use-case-icon">🔧</div>
+          <h3>Jasa & Servis</h3>
+          <p>Estimasi biaya, booking teknisi, dan update status perbaikan.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="section pricing" id="harga">
+    <div class="section-inner text-center">
+      <div class="section-tag mx-auto">💰 Harga</div>
+      <h2 class="section-title">Satu harga, semua fitur</h2>
+      <p class="section-sub mx-auto">Tidak ada biaya tersembunyi. Tidak ada batas fitur. Bayar sesuai penggunaan.</p>
+      <div class="price-card">
+        <div class="price-card-badge">⭐ Paling Populer</div>
+        <div class="price-card-price">
+          <span class="currency">Rp</span>
+          <span class="number" id="lp-pricing-amount">49.000</span>
+          <span class="per">/bulan</span>
+        </div>
+        <div class="price-card-strike-row">
+          <span class="strike" id="lp-pricing-old">Rp 99.000</span>
+          <span class="badge-discount">HEMAT 50%</span>
+        </div>
+        <ul class="price-card-list" id="lp-pricing-features">
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Auto-reply AI 24/7 tanpa batas pesan
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Katalog produk hingga 500 item
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Broadcast ke 10.000 kontak/bulan
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Multi-agen hingga 5 operator
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Dashboard & analitik lengkap
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Integrasi e-commerce & marketplace
+          </li>
+          <li>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>
+            Support via WhatsApp prioritas
+          </li>
+        </ul>
+        <a href="#" class="btn-primary lp-activation-link" style="width:100%;justify-content:center;font-size:1.05rem;">
+          <span class="wa-icon"></span><span id="lp-pricing-cta">Mulai Gratis 14 Hari</span>
+        </a>
+        <p class="price-card-note" id="lp-pricing-note">Tidak perlu kartu kredit · Batalkan kapan saja · Setup gratis</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section" id="faq">
+    <div class="section-inner text-center">
+      <div class="section-tag mx-auto">❓ FAQ</div>
+      <h2 class="section-title">Pertanyaan yang sering ditanyakan</h2>
+      <div class="faq" id="lp-faq-container">
+        <details class="faq-item">
+          <summary class="faq-q">Apakah saya perlu keahlian teknis untuk menggunakan AdminPintar?</summary>
+          <p class="faq-a">Tidak sama sekali. AdminPintar dirancang untuk pemilik bisnis, bukan programmer. Antarmuka kami sangat intuitif — jika bisa menggunakan WhatsApp, Anda bisa menggunakan AdminPintar.</p>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q">Apakah WhatsApp saya bisa diblokir?</summary>
+          <p class="faq-a">AdminPintar menggunakan WhatsApp Business API resmi yang disetujui oleh Meta. Nomor Anda aman dan tidak akan diblokir selama mengikuti kebijakan penggunaan WhatsApp Business.</p>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q">Berapa lama setup dan pengaturan awal?</summary>
+          <p class="faq-a">Rata-rata pelanggan kami bisa aktif dalam 5–15 menit. Kami menyediakan template siap pakai untuk berbagai jenis bisnis, sehingga Anda tidak perlu mulai dari nol.</p>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q">Apakah bisa digunakan untuk beberapa nomor WhatsApp?</summary>
+          <p class="faq-a">Ya, paket kami mendukung multi-nomor. Anda bisa mengelola beberapa nomor WhatsApp (misalnya untuk cabang berbeda) dari satu dashboard yang sama.</p>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q">Bagaimana jika pelanggan ingin bicara dengan manusia?</summary>
+          <p class="faq-a">AdminPintar memiliki fitur handover otomatis. Ketika pelanggan meminta bicara dengan agen, atau ketika chatbot tidak bisa menjawab, percakapan akan dialihkan ke tim Anda secara mulus.</p>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q">Apakah ada kontrak jangka panjang?</summary>
+          <p class="faq-a">Tidak ada kontrak. Anda berlangganan bulanan dan bisa membatalkan kapan saja. Tidak ada biaya penalti atau biaya tersembunyi apapun.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="section final-cta">
+    <div class="section-inner text-center">
+      <h2>
+        <span id="lp-final-h1">Saatnya bisnis Anda</span><br>
+        <span id="lp-final-h2">kerja 24 jam.</span>
+      </h2>
+      <p class="final-p" id="lp-final-p">Bergabung dengan 500+ UMKM yang sudah menggunakan AdminPintar untuk melayani pelanggan lebih cepat, lebih cerdas, dan lebih efisien.</p>
+      <div class="final-actions">
+        <a href="#" class="btn-primary lp-activation-link">
+          <span class="wa-icon"></span><span id="lp-final-cta-primary">Mulai Gratis 14 Hari</span>
+        </a>
+        <a href="#" class="btn-secondary lp-wa-link">
+          <span id="lp-final-cta-secondary">💬 Tanya via WhatsApp</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <a href="#" class="nav-logo">AdminPintar<span class="nav-logo-dot">.id</span></a>
+        <p>Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Produk</h4>
+        <a href="#fitur">Fitur</a>
+        <a href="#harga">Harga</a>
+        <a href="#">Integrasi</a>
+        <a href="#">Changelog</a>
+      </div>
+      <div class="footer-col">
+        <h4>Perusahaan</h4>
+        <a href="#">Tentang Kami</a>
+        <a href="#">Blog</a>
+        <a href="#">Karir</a>
+        <a href="#">Kontak</a>
+      </div>
+      <div class="footer-col">
+        <h4>Dukungan</h4>
+        <a href="#">Dokumentasi</a>
+        <a href="#faq">FAQ</a>
+        <a href="#" class="lp-wa-link">WhatsApp Support</a>
+        <a href="#">Status Sistem</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2025 AdminPintar.id — All rights reserved.</span>
+      <span>
+        <a href="#" style="color:#64748b;text-decoration:none;margin-right:16px">Kebijakan Privasi</a>
+        <a href="#" style="color:#64748b;text-decoration:none">Syarat & Ketentuan</a>
+      </span>
+    </div>
+  </footer>
+
+  <!-- Sticky Mobile CTA -->
+  <div class="sticky-cta-bar">
+    <a href="#" class="sticky-cta lp-activation-link">
+      <div>
+        <div class="sticky-cta-label" id="lp-sticky-cta-text">Mulai sekarang</div>
+        <div class="sticky-cta-main">Coba Gratis 14 Hari</div>
+      </div>
+      <div class="sticky-cta-price" id="lp-sticky-cta-price">Rp49rb/bln</div>
+    </a>
+  </div>
+
+  <!-- Scroll Reveal -->
+  <script>
+    (function() {
+      var els = document.querySelectorAll('.reveal');
+      if (!('IntersectionObserver' in window)) {
+        els.forEach(function(e) { e.classList.add('visible'); });
+        return;
+      }
+      var obs = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            obs.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12 });
+      els.forEach(function(e) { obs.observe(e); });
+    })();
+  </script>
+
+  <!-- Dynamic content loader — fetches from API and updates DOM -->
+  <script>
+  (function() {
+    // Change this URL to match your API domain
+    var API_URL = 'https://apps.adminpintar.id/api/lp-content';
+
+    function el(id) { return document.getElementById(id); }
+    function setHtml(id, v) { var e = el(id); if (e && v != null) e.innerHTML = v; }
+    function setText(id, v) { var e = el(id); if (e && v != null) e.textContent = v; }
+    function setHref(cls, v) {
+      if (!v) return;
+      document.querySelectorAll('.' + cls).forEach(function(e) { e.href = v; });
+    }
+    function setStickyHref(v) {
+      if (!v) return;
+      var s = document.querySelector('.sticky-cta');
+      if (s) s.href = v;
+    }
+
+    fetch(API_URL)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        // Promo bar
+        setHtml('lp-promo-text', d.promo_bar);
+
+        // Hero
+        if (d.hero) {
+          var h = d.hero;
+          if (h.headline) {
+            setHtml('lp-hero-line-1', h.headline[0] || '');
+            setHtml('lp-hero-line-2', h.headline[1] || '');
+            setHtml('lp-hero-line-3', h.headline[2] || '');
+          }
+          setHtml('lp-hero-sub', h.sub);
+          setText('lp-hero-price-amount', h.price_amount);
+          setText('lp-hero-price-period', h.price_period);
+          setHtml('lp-hero-price-old', h.price_old ? '<span style="text-decoration:line-through">' + h.price_old + '</span> · ' + (h.price_discount || '') : '');
+          setText('lp-hero-cta-primary', h.cta_primary);
+          if (h.features) {
+            var fEl = el('lp-hero-features');
+            if (fEl) {
+              fEl.innerHTML = h.features.map(function(f) {
+                return '<div class="hero-card-feature"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>' + f + '</div>';
+              }).join('');
+            }
+          }
+        }
+
+        // Pricing
+        if (d.pricing) {
+          var p = d.pricing;
+          setText('lp-pricing-amount', p.amount);
+          setText('lp-pricing-old', p.old ? 'Rp ' + p.old : '');
+          setText('lp-pricing-cta', p.cta);
+          setHtml('lp-pricing-note', p.note);
+          if (p.features) {
+            var pfEl = el('lp-pricing-features');
+            if (pfEl) {
+              pfEl.innerHTML = p.features.map(function(f) {
+                return '<li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5L20 7"/></svg>' + f + '</li>';
+              }).join('');
+            }
+          }
+        }
+
+        // FAQ
+        if (d.faq && d.faq.length) {
+          var faqEl = el('lp-faq-container');
+          if (faqEl) {
+            faqEl.innerHTML = d.faq.map(function(item) {
+              return '<details class="faq-item"><summary class="faq-q">' + item.q + '</summary><p class="faq-a">' + item.a + '</p></details>';
+            }).join('');
+          }
+        }
+
+        // Links & Final CTA
+        if (d.links) {
+          var l = d.links;
+          setHtml('lp-final-h1', l.final_h1);
+          setHtml('lp-final-h2', l.final_h2);
+          setHtml('lp-final-p', l.final_sub);
+          setText('lp-final-cta-primary', l.final_cta_primary);
+          setText('lp-final-cta-secondary', '💬 ' + l.final_cta_secondary);
+          if (l.whatsapp) setHref('lp-wa-link', l.whatsapp);
+          if (l.activation) {
+            setHref('lp-activation-link', l.activation);
+            setStickyHref(l.activation);
+          }
+        }
+      })
+      .catch(function() { /* fail silently — show default HTML content */ });
+  })();
+  </script>
+
+</body>
+</html>
