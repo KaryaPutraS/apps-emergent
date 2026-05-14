@@ -1186,26 +1186,100 @@ async def update_ai_agent_config(req: AIAgentConfig, current_user: Dict = Depend
 async def get_license(current_user: Dict = Depends(get_current_user)):
     uid = current_user["userId"]
     doc = await db.license.find_one({"userId": uid}, {"_id": 0})
-    return doc or {"valid": False, "status": "missing"}
+    if not doc or not doc.get("licenseKey"):
+        return {"valid": False, "status": "missing"}
+
+    # Sync latest data from chatbot_licenses
+    key = doc.get("licenseKey", "").upper()
+    if key:
+        lic = await db.chatbot_licenses.find_one({"license_key": key})
+        if lic:
+            from datetime import timezone as _tz
+            expires_dt = lic.get("expires_at")
+            expires_str = expires_dt.strftime("%Y-%m-%d") if expires_dt else ""
+            lic_status = lic.get("status", "active")
+            # Check real expiry
+            if expires_dt:
+                now = datetime.now(_tz.utc) if (hasattr(expires_dt, "tzinfo") and expires_dt.tzinfo) else datetime.utcnow()
+                if expires_dt < now and lic_status == "active":
+                    lic_status = "expired"
+            synced = {
+                "status": lic_status,
+                "valid": lic_status == "active",
+                "customerName": lic.get("customer_name") or doc.get("customerName", ""),
+                "planName": lic.get("plan_name", "standard").capitalize(),
+                "expiresAt": expires_str,
+                "maxActivations": lic.get("max_activations", 1),
+                "activationsUsed": lic.get("activations_used", 0),
+                "productCode": lic.get("product_code", ""),
+            }
+            await db.license.update_one({"userId": uid}, {"$set": synced})
+            doc.update(synced)
+    return doc
 
 @api_router.post("/license/activate")
 async def activate_license(req: LicenseActivate, current_user: Dict = Depends(get_current_user)):
     rate_limit("license_activate", current_user["userId"], max_attempts=10, window_seconds=600)
     uid = current_user["userId"]
+    key = req.licenseKey.strip().upper()
+
+    # Lookup in chatbot_licenses
+    lic = await db.chatbot_licenses.find_one({"license_key": key})
+    if not lic:
+        raise HTTPException(status_code=404, detail="License key tidak ditemukan.")
+
+    if lic.get("status") == "suspended":
+        raise HTTPException(status_code=403, detail="Lisensi ini telah disuspend.")
+    if lic.get("status") == "expired":
+        raise HTTPException(status_code=403, detail="Lisensi ini sudah expired.")
+
+    # Check expiry date
+    expires_dt = lic.get("expires_at")
+    from datetime import timezone as _tz
+    if expires_dt:
+        if hasattr(expires_dt, "tzinfo") and expires_dt.tzinfo:
+            now_aware = datetime.now(_tz.utc)
+            if expires_dt < now_aware:
+                raise HTTPException(status_code=403, detail="Lisensi sudah melewati tanggal expired.")
+        else:
+            if expires_dt < datetime.utcnow():
+                raise HTTPException(status_code=403, detail="Lisensi sudah melewati tanggal expired.")
+
+    # Check activations
+    max_act = lic.get("max_activations", 1)
+    used_act = lic.get("activations_used", 0)
+    # Check if this user already activated this key (don't double-count)
+    existing = await db.license.find_one({"userId": uid})
+    already_this_key = existing and existing.get("licenseKey", "").upper() == key
+
+    if not already_this_key and used_act >= max_act:
+        raise HTTPException(status_code=403, detail=f"Lisensi ini sudah mencapai batas maksimum aktivasi ({max_act}).")
+
+    expires_str = expires_dt.strftime("%Y-%m-%d") if expires_dt else ""
     license_data = {
         "userId": uid,
         "valid": True,
-        "status": "active",
-        "licenseKey": req.licenseKey,
-        "customerName": "Customer",
-        "planName": "Professional",
-        "expiresAt": (datetime.utcnow() + timedelta(days=365)).strftime("%Y-%m-%d"),
-        "maxActivations": 3,
-        "instanceId": str(uuid.uuid4()),
+        "status": lic.get("status", "active"),
+        "licenseKey": key,
+        "customerName": lic.get("customer_name") or current_user.get("username", ""),
+        "planName": lic.get("plan_name", "standard").capitalize(),
+        "expiresAt": expires_str,
+        "maxActivations": max_act,
+        "activationsUsed": used_act + (0 if already_this_key else 1),
+        "productCode": lic.get("product_code", ""),
+        "instanceId": existing.get("instanceId", str(uuid.uuid4())) if existing else str(uuid.uuid4()),
     }
     await db.license.update_one({"userId": uid}, {"$set": license_data}, upsert=True)
-    await add_log("LICENSE_ACTIVATED", f"[{current_user['username']}] Lisensi diaktifkan: {req.licenseKey}", uid)
-    await log_user_activity(uid, current_user["username"], "LICENSE_ACTIVATED", f"Lisensi diaktifkan: {req.licenseKey}")
+
+    # Increment activations_used in chatbot_licenses only for new activation
+    if not already_this_key:
+        await db.chatbot_licenses.update_one(
+            {"license_key": key},
+            {"$inc": {"activations_used": 1}}
+        )
+
+    await add_log("LICENSE_ACTIVATED", f"[{current_user['username']}] Lisensi diaktifkan: {key}", uid)
+    await log_user_activity(uid, current_user["username"], "LICENSE_ACTIVATED", f"Lisensi diaktifkan: {key}")
     return license_data
 
 @api_router.delete("/license")
