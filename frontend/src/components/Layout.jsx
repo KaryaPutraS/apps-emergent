@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
   Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings, SlidersHorizontal,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
-  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity, ChevronDown
+  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity, ChevronDown, Globe
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
@@ -33,11 +33,13 @@ import Documentation from '../pages/Documentation';
 import Branding from '../pages/Branding';
 import ActivityLog from '../pages/ActivityLog';
 import BotSettings from '../pages/BotSettings';
+import LPEditor from '../pages/LPEditor';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
   { id: 'activity-log', label: 'Log Aktivitas', icon: Activity, group: 'main' },
   { id: 'branding', label: 'Branding', icon: Palette, group: 'main' },
+  { id: 'lp-editor', label: 'Editor LP', icon: Globe, group: 'main' },
   { id: 'docs', label: 'Dokumentasi', icon: BookMarked, group: 'main' },
 ];
 
@@ -86,6 +88,7 @@ const pageComponents = {
   'user-management': UserManagement,
   'activity-log': ActivityLog,
   'branding': Branding,
+  'lp-editor': LPEditor,
   'reset-data': ResetData,
   'settings': SettingsPage,
   'bot-settings': BotSettings,
@@ -108,7 +111,7 @@ const Layout = () => {
   const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
 
   // Superadmin can access user-management, branding, and docs; user never accesses these
-  const superadminAllowed = ['user-management', 'activity-log', 'branding', 'docs'];
+  const superadminAllowed = ['user-management', 'activity-log', 'branding', 'lp-editor', 'docs'];
   const userBlocked = ['user-management', 'activity-log', 'branding'];
   const safeTab = isSuperAdmin
     ? (superadminAllowed.includes(activeTab) ? activeTab : 'user-management')

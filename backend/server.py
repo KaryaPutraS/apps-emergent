@@ -3074,6 +3074,88 @@ async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
         raise HTTPException(status_code=502, detail=str(e))
 
 # ============================================================
+# LANDING PAGE CONTENT
+# ============================================================
+
+LP_DEFAULTS = {
+    "promo_bar": "PROMO LAUNCHING — Hemat 50% · Rp 99.000 → <strong>Rp 49.000/bulan</strong>",
+    "hero": {
+        "eyebrow": "Chatbot WhatsApp · UMKM Indonesia",
+        "headline": ["Chatbot WhatsApp", "yang <span class=\"accent italic\">atur diri</span>", "sendiri."],
+        "sub": "Cukup ceritakan bisnis Anda — AI yang menyusun <strong>Rules, Knowledge Base, Template, dan Persona</strong> chatbot. Tugas Anda: koreksi &amp; approve. Setup hanya 5 menit.",
+        "price_amount": "49",
+        "price_period": ".000/bln",
+        "price_old": "Rp 99.000",
+        "price_discount": "Hemat 50%",
+        "cta_primary": "Aktifkan Rp 49rb/bln",
+        "cta_secondary": "Lihat cara kerjanya",
+        "features": [
+            "Koneksi WAHA included",
+            "AI Agent — 7 Provider",
+            "AI Setup Assistant",
+            "Broadcast Anti-Banned",
+        ],
+    },
+    "pricing": {
+        "amount": "49.000",
+        "old": "99.000",
+        "period": "/bulan",
+        "name": "Paket Lengkap",
+        "tag": "Semua fitur · WAHA included · AI 7 provider",
+        "features": [
+            "Koneksi WAHA included",
+            "AI Agent — 7 provider (OpenAI, Gemini, Claude, dst)",
+            "Rules Engine + Knowledge Base unlimited",
+            "AI Setup Assistant (setup 5 menit)",
+            "Broadcast anti-banned + Auto-tag kontak",
+            "Dashboard real-time + Logs detail",
+            "Update gratis selamanya",
+            "Support via WhatsApp",
+        ],
+        "cta": "Aktivasi Sekarang",
+        "note": "Setelah kuota promo habis, harga balik ke Rp 99.000/bulan.",
+    },
+    "faq": [
+        {"q": "Apa beda 3 mode (Rules / Rules+AI / Full AI)?", "a": "<strong>Rules</strong> = balasan teks template, 0 token AI, cocok untuk FAQ. <strong>Rules+AI</strong> = rule trigger, lalu AI poles biar natural, hemat token. <strong>Full AI</strong> = AI yang handle semua, paling pinter untuk percakapan kompleks. Anda bisa mix per-rule sesuai kebutuhan."},
+        {"q": "Saya gaptek, beneran bisa setup sendiri?", "a": "Bisa banget. AI Setup Assistant menyusun semuanya dari deskripsi bisnis Anda. Tugas Anda cuma: ceritakan bisnis, cek hasilnya, klik Approve. Selesai."},
+        {"q": "Rp 49rb/bulan itu termasuk apa saja?", "a": "Termasuk <strong>akses penuh dashboard, koneksi WAHA, semua fitur</strong> (Rules, AI Agent, Knowledge, Broadcast, dll), dan AI Setup Assistant. Untuk biaya pemakaian AI, pakai API key provider pilihan Anda — atau pakai Ollama lokal gratis."},
+        {"q": "Berapa biaya AI rata-rata per bulan?", "a": "Tergantung volume chat. Rata-rata pengguna mode Rules+AI habis <strong>Rp 30–100rb/bulan</strong> karena 80% chat dijawab Rules. Mau Rp 0? Pakai Ollama lokal di komputer Anda."},
+        {"q": "Aman dari banned WhatsApp?", "a": "Aman. Kami pakai WAHA dengan delay acak 3–7 detik, batch limit, dan kontrol broadcast harian. Risiko banned jauh lebih kecil dibanding tool blast biasa."},
+        {"q": "Kalau saya berhenti langganan, data hilang?", "a": "Tidak. Semua data (kontak, chat history, template) bisa <strong>diekspor ke CSV/JSON</strong> kapan saja. Tanpa lock-in."},
+        {"q": "Promo Rp 49rb berlaku selamanya untuk akun saya?", "a": "Ya. Selama Anda aktivasi di periode promo, <strong>harga Rp 49rb terkunci</strong> untuk perpanjangan berikutnya. Pelanggan baru setelah promo habis bayar Rp 99rb."},
+    ],
+    "links": {
+        "whatsapp": "https://wa.me/6281234567890",
+        "activation": "#",
+        "final_h1": "Saatnya bisnis Anda",
+        "final_h2": "kerja <span class=\"italic\">24 jam</span>.",
+        "final_sub": "Setiap menit chat tidak terbalas = calon transaksi yang hilang.<br>Dengan Rp 1.633/hari, AdminPintar.id jadi tim CS Anda — bekerja tanpa libur, hemat, dan aman.",
+        "final_cta_primary": "Aktivasi Lisensi — Rp 49.000/bln",
+        "final_cta_secondary": "Tanya dulu via WhatsApp",
+    },
+}
+
+@api_router.get("/lp-content")
+async def get_lp_content():
+    """Public: returns landing page editable content."""
+    doc = await db.lp_content.find_one({"_id": "main"})
+    if not doc:
+        return LP_DEFAULTS
+    doc.pop("_id", None)
+    return doc
+
+@api_router.put("/admin/lp-content")
+async def update_lp_content(content: dict, admin: Dict = Depends(require_superadmin)):
+    """Superadmin: update landing page content."""
+    content.pop("_id", None)
+    await db.lp_content.replace_one(
+        {"_id": "main"},
+        {"_id": "main", **content},
+        upsert=True,
+    )
+    return {"ok": True}
+
+# ============================================================
 # HEALTH CHECK
 # ============================================================
 
