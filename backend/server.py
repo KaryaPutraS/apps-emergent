@@ -3084,6 +3084,7 @@ LP_DEFAULTS = {
         "brand_suffix": ".id",
         "favicon_url": "",
         "logo_url": "",
+        "template": "default",
     },
     "promo_bar": "PROMO LAUNCHING — Hemat 50% · Rp 99.000 → <strong>Rp 49.000/bulan</strong>",
     "hero": {
@@ -3161,6 +3162,207 @@ async def update_lp_content(content: dict, admin: Dict = Depends(require_superad
         upsert=True,
     )
     return {"ok": True}
+
+# ============================================================
+# LANDING PAGE ANALYTICS
+# ============================================================
+
+class LPEvent(BaseModel):
+    session_id: str
+    event_type: str            # pageview | heartbeat | click | scroll | unload
+    template: Optional[str] = ""
+    path: Optional[str] = "/"
+    referrer: Optional[str] = ""
+    target: Optional[str] = "" # click target: activation | whatsapp | faq:N | nav:fitur
+    scroll_pct: Optional[int] = None
+    viewport_w: Optional[int] = None
+    viewport_h: Optional[int] = None
+    device: Optional[str] = "" # mobile | tablet | desktop
+    duration_ms: Optional[int] = None
+
+def _parse_browser(ua: str) -> str:
+    ua = (ua or "").lower()
+    if "edg/" in ua: return "Edge"
+    if "chrome/" in ua and "chromium" not in ua: return "Chrome"
+    if "firefox/" in ua: return "Firefox"
+    if "safari/" in ua and "chrome" not in ua: return "Safari"
+    if "opera" in ua or "opr/" in ua: return "Opera"
+    return "Other"
+
+def _parse_os(ua: str) -> str:
+    ua = (ua or "").lower()
+    if "android" in ua: return "Android"
+    if "iphone" in ua or "ipad" in ua or "ipod" in ua: return "iOS"
+    if "mac os" in ua: return "macOS"
+    if "windows" in ua: return "Windows"
+    if "linux" in ua: return "Linux"
+    return "Other"
+
+@api_router.post("/lp-track")
+async def lp_track(ev: LPEvent, request: Request):
+    """Public: record landing page analytics event."""
+    ua = request.headers.get("user-agent", "")[:300]
+    ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
+    country = request.headers.get("cf-ipcountry", "") or ""
+    doc = {
+        "session_id": ev.session_id,
+        "event_type": ev.event_type,
+        "template": ev.template or "default",
+        "path": ev.path or "/",
+        "referrer": (ev.referrer or "")[:500],
+        "target": ev.target or "",
+        "scroll_pct": ev.scroll_pct,
+        "viewport_w": ev.viewport_w,
+        "viewport_h": ev.viewport_h,
+        "device": ev.device or "",
+        "duration_ms": ev.duration_ms,
+        "ip": ip,
+        "country": country,
+        "ua": ua,
+        "browser": _parse_browser(ua),
+        "os": _parse_os(ua),
+        "ts": datetime.utcnow(),
+    }
+    await db.lp_events.insert_one(doc)
+    return {"ok": True}
+
+@api_router.get("/admin/lp-analytics")
+async def lp_analytics(days: int = 7, admin: Dict = Depends(require_superadmin)):
+    """Superadmin: aggregated LP analytics for last N days."""
+    days = max(1, min(90, int(days)))
+    since = datetime.utcnow() - timedelta(days=days)
+    coll = db.lp_events
+
+    total_events = await coll.count_documents({"ts": {"$gte": since}})
+    total_views = await coll.count_documents({"ts": {"$gte": since}, "event_type": "pageview"})
+
+    unique_sessions = await coll.distinct("session_id", {"ts": {"$gte": since}})
+    unique_count = len(unique_sessions)
+
+    # Sessions with at least 1 click → conversions
+    conv_sessions = await coll.distinct("session_id", {"ts": {"$gte": since}, "event_type": "click", "target": {"$in": ["activation", "whatsapp"]}})
+    conv_count = len(conv_sessions)
+    conv_rate = round((conv_count / unique_count * 100), 2) if unique_count else 0.0
+
+    # Avg duration: max(ts) - min(ts) per session
+    duration_pipeline = [
+        {"$match": {"ts": {"$gte": since}}},
+        {"$group": {"_id": "$session_id", "min_ts": {"$min": "$ts"}, "max_ts": {"$max": "$ts"}, "evt_count": {"$sum": 1}}},
+        {"$project": {"dur_ms": {"$subtract": ["$max_ts", "$min_ts"]}, "evt_count": 1}},
+    ]
+    sessions_meta = await coll.aggregate(duration_pipeline).to_list(length=None)
+    durations = [s["dur_ms"] for s in sessions_meta if s["dur_ms"] > 0]
+    avg_duration_ms = int(sum(durations) / len(durations)) if durations else 0
+    median_duration_ms = int(sorted(durations)[len(durations)//2]) if durations else 0
+    bounce_sessions = sum(1 for s in sessions_meta if s["evt_count"] <= 1)
+    bounce_rate = round((bounce_sessions / unique_count * 100), 2) if unique_count else 0.0
+
+    async def _group_count(field, extra_match=None, limit=10):
+        match = {"ts": {"$gte": since}}
+        if extra_match: match.update(extra_match)
+        pipeline = [
+            {"$match": match},
+            {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": limit},
+        ]
+        rows = await coll.aggregate(pipeline).to_list(length=limit)
+        return [{"key": r["_id"] or "(unknown)", "count": r["count"]} for r in rows]
+
+    top_referrers = await _group_count("referrer", {"event_type": "pageview"})
+    top_countries = await _group_count("country", {"event_type": "pageview"})
+    top_browsers = await _group_count("browser", {"event_type": "pageview"})
+    top_os = await _group_count("os", {"event_type": "pageview"})
+    top_devices = await _group_count("device", {"event_type": "pageview"})
+    top_targets = await _group_count("target", {"event_type": "click"}, 20)
+    top_templates = await _group_count("template", {"event_type": "pageview"})
+
+    # Per-template performance (views, unique sessions, conv rate)
+    tpl_pipeline = [
+        {"$match": {"ts": {"$gte": since}, "event_type": {"$in": ["pageview", "click"]}}},
+        {"$group": {
+            "_id": {"tpl": "$template", "sid": "$session_id"},
+            "has_click": {"$max": {"$cond": [{"$eq": ["$event_type", "click"]}, 1, 0]}},
+        }},
+        {"$group": {
+            "_id": "$_id.tpl",
+            "sessions": {"$sum": 1},
+            "converted": {"$sum": "$has_click"},
+        }},
+        {"$sort": {"sessions": -1}},
+    ]
+    tpl_perf_raw = await coll.aggregate(tpl_pipeline).to_list(length=None)
+    template_performance = [
+        {
+            "template": r["_id"] or "default",
+            "sessions": r["sessions"],
+            "converted": r["converted"],
+            "conv_rate": round((r["converted"] / r["sessions"] * 100), 2) if r["sessions"] else 0.0,
+        }
+        for r in tpl_perf_raw
+    ]
+
+    # Scroll depth distribution (max scroll pct per session)
+    scroll_pipeline = [
+        {"$match": {"ts": {"$gte": since}, "event_type": "scroll"}},
+        {"$group": {"_id": "$session_id", "max_pct": {"$max": "$scroll_pct"}}},
+        {"$bucket": {
+            "groupBy": "$max_pct",
+            "boundaries": [0, 25, 50, 75, 100, 101],
+            "default": "other",
+            "output": {"count": {"$sum": 1}},
+        }},
+    ]
+    scroll_buckets = await coll.aggregate(scroll_pipeline).to_list(length=None)
+    scroll_distribution = [{"bucket": r["_id"], "count": r["count"]} for r in scroll_buckets]
+
+    # Timeline: views per day
+    timeline_pipeline = [
+        {"$match": {"ts": {"$gte": since}, "event_type": "pageview"}},
+        {"$group": {
+            "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$ts"}},
+            "views": {"$sum": 1},
+            "sessions": {"$addToSet": "$session_id"},
+        }},
+        {"$project": {"date": "$_id", "views": 1, "unique": {"$size": "$sessions"}, "_id": 0}},
+        {"$sort": {"date": 1}},
+    ]
+    timeline = await coll.aggregate(timeline_pipeline).to_list(length=None)
+
+    # Recent events (last 50)
+    recent_raw = await coll.find(
+        {"ts": {"$gte": since}},
+        {"_id": 0, "session_id": 1, "event_type": 1, "target": 1, "country": 1, "browser": 1, "os": 1, "device": 1, "referrer": 1, "template": 1, "ts": 1, "scroll_pct": 1},
+    ).sort("ts", -1).limit(50).to_list(length=50)
+    for r in recent_raw:
+        if isinstance(r.get("ts"), datetime):
+            r["ts"] = r["ts"].isoformat()
+
+    return {
+        "range_days": days,
+        "summary": {
+            "total_events": total_events,
+            "total_views": total_views,
+            "unique_visitors": unique_count,
+            "conversions": conv_count,
+            "conv_rate": conv_rate,
+            "avg_duration_ms": avg_duration_ms,
+            "median_duration_ms": median_duration_ms,
+            "bounce_rate": bounce_rate,
+            "bounce_sessions": bounce_sessions,
+        },
+        "timeline": timeline,
+        "top_referrers": top_referrers,
+        "top_countries": top_countries,
+        "top_browsers": top_browsers,
+        "top_os": top_os,
+        "top_devices": top_devices,
+        "top_targets": top_targets,
+        "top_templates": top_templates,
+        "template_performance": template_performance,
+        "scroll_distribution": scroll_distribution,
+        "recent_events": recent_raw,
+    }
 
 # ============================================================
 # HEALTH CHECK

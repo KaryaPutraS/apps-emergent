@@ -83,12 +83,108 @@ const FeatureList = ({ items, onChange, placeholder = 'Fitur...' }) => {
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────
 const TABS = [
+  { id: 'template', label: '🎭 Template' },
   { id: 'branding', label: '🎨 Branding' },
   { id: 'hero',     label: '🏠 Hero & Promo' },
   { id: 'pricing',  label: '💰 Harga' },
   { id: 'faq',      label: '❓ FAQ' },
   { id: 'links',    label: '🔗 Link & CTA' },
 ];
+
+// ─── Tab: Template ────────────────────────────────────────────────────────
+const TEMPLATES = [
+  {
+    id: 'default',
+    name: 'Classic Green',
+    desc: 'Tampilan asli — WhatsApp green, hangat, friendly. Cocok untuk UMKM, target audience luas.',
+    accent: 'bg-emerald-500',
+    preview: (
+      <div className="bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-lg p-3 h-32 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-bold text-slate-900">Brand<span className="text-emerald-500">.id</span></div>
+          <div className="bg-emerald-500 text-white text-[9px] px-2 py-0.5 rounded-full">CTA</div>
+        </div>
+        <div className="text-[10px] font-bold text-slate-900 leading-tight mt-1">Chatbot WA <span className="text-emerald-600 italic">atur diri</span></div>
+        <div className="h-1 bg-emerald-200 rounded-full w-2/3 mt-auto" />
+        <div className="h-1 bg-emerald-100 rounded-full w-1/2" />
+      </div>
+    ),
+  },
+  {
+    id: 'minimal',
+    name: 'Minimal Mono',
+    desc: 'Bersih, monokrom, premium. Square corners, no shadow. Cocok untuk audience profesional / B2B.',
+    accent: 'bg-slate-900',
+    preview: (
+      <div className="bg-white border border-slate-300 rounded p-3 h-32 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-bold text-slate-900">Brand<span className="underline decoration-2">.id</span></div>
+          <div className="bg-slate-900 text-white text-[9px] px-2 py-0.5 rounded-sm">CTA</div>
+        </div>
+        <div className="text-[10px] font-bold text-slate-900 leading-tight mt-1 tracking-tight">Chatbot WA <span className="underline decoration-slate-900">atur diri</span></div>
+        <div className="h-1 bg-slate-300 rounded-sm w-2/3 mt-auto" />
+        <div className="h-1 bg-slate-200 rounded-sm w-1/2" />
+      </div>
+    ),
+  },
+  {
+    id: 'bold',
+    name: 'Bold Dark',
+    desc: 'Dark mode, gradient ungu-pink, energetic. Pill buttons. Cocok untuk audience muda / startup-ish.',
+    accent: 'bg-gradient-to-r from-purple-500 to-pink-500',
+    preview: (
+      <div className="bg-slate-950 border border-purple-900 rounded-xl p-3 h-32 flex flex-col gap-1.5 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-600/20 to-transparent" />
+        <div className="relative flex items-center justify-between">
+          <div className="text-xs font-bold text-white">Brand<span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">.id</span></div>
+          <div className="bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[9px] px-2 py-0.5 rounded-full shadow-lg shadow-purple-500/50">CTA</div>
+        </div>
+        <div className="relative text-[10px] font-bold text-white leading-tight mt-1">Chatbot WA <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent italic">atur diri</span></div>
+        <div className="relative h-1 bg-purple-700 rounded-full w-2/3 mt-auto" />
+        <div className="relative h-1 bg-purple-900 rounded-full w-1/2" />
+      </div>
+    ),
+  },
+];
+
+const TemplateTab = ({ data, onChange }) => {
+  const current = data.branding?.template || 'default';
+  const set = (id) => onChange({ ...data, branding: { ...(data.branding || {}), template: id } });
+  return (
+    <div className="space-y-4">
+      <Card title="Pilih Template Tampilan">
+        <p className="text-sm text-slate-500 -mt-2">
+          Pilih salah satu dari 3 desain di bawah. Semua template menampilkan teks yang sama — bisa untuk A/B testing.
+          Analytics akan mencatat performa per template di menu <strong>Analytics LP</strong>.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-1">
+          {TEMPLATES.map(t => {
+            const active = current === t.id;
+            return (
+              <button key={t.id} onClick={() => set(t.id)}
+                className={`text-left rounded-xl border-2 p-3 transition-all ${active ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-200 hover:border-slate-300'}`}>
+                {t.preview}
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="font-bold text-sm text-slate-900">{t.name}</div>
+                  {active && <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Aktif</span>}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 leading-relaxed">{t.desc}</div>
+                <div className={`h-1 rounded-full mt-3 ${t.accent}`} />
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+      <Card title="Tips A/B Testing">
+        <ul className="text-sm text-slate-600 space-y-1.5 list-disc list-inside">
+          <li>Ganti template tiap minggu, lalu bandingkan <strong>conversion rate</strong> di menu Analytics LP.</li>
+          <li>Pengunjung yang sudah pernah lihat akan otomatis dapat template yang aktif saat ini.</li>
+          <li>Template <strong>Classic Green</strong> cocok untuk UMKM tradisional, <strong>Minimal Mono</strong> untuk B2B/profesional, <strong>Bold Dark</strong> untuk audience muda.</li>
+        </ul>
+      </Card>
+    </div>
+  );
+};
 
 // ─── File → DataURL helper ─────────────────────────────────────────────────
 const fileToDataUrl = (file, maxBytes = 512 * 1024) => new Promise((resolve, reject) => {
@@ -419,7 +515,7 @@ const LinksTab = ({ data, onChange }) => {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 const LPEditor = () => {
-  const [activeTab, setActiveTab] = useState('branding');
+  const [activeTab, setActiveTab] = useState('template');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -512,6 +608,7 @@ const LPEditor = () => {
       {/* Tab content */}
       {data && (
         <div>
+          {activeTab === 'template' && <TemplateTab data={data} onChange={handleChange} />}
           {activeTab === 'branding' && <BrandingTab data={data} onChange={handleChange} />}
           {activeTab === 'hero'     && <HeroTab     data={data} onChange={handleChange} />}
           {activeTab === 'pricing'  && <PricingTab  data={data} onChange={handleChange} />}

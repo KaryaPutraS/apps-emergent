@@ -766,9 +766,54 @@
       background-size: contain;
       flex-shrink: 0;
     }
+
+    /* ═══════════ TEMPLATE: MINIMAL (light, airy, monochrome) ═══════════ */
+    body.tpl-minimal { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    body.tpl-minimal :root,
+    body.tpl-minimal { --green: #111827; --green-dark: #000; --green-deep: #1f2937; --green-bg: #f8fafc; }
+    body.tpl-minimal .promo-bar { background: #111827; color: #fff; }
+    body.tpl-minimal nav { background: rgba(255,255,255,.95); border-bottom: 1px solid #e2e8f0; box-shadow: none; }
+    body.tpl-minimal .nav-cta, body.tpl-minimal .btn-primary, body.tpl-minimal .pricing-cta, body.tpl-minimal .sticky-cta {
+      background: #111827; color: #fff; border-radius: 4px; box-shadow: none; font-weight: 600; letter-spacing: .02em;
+    }
+    body.tpl-minimal .btn-secondary { border: 1px solid #111827; color: #111827; background: transparent; border-radius: 4px; }
+    body.tpl-minimal .accent, body.tpl-minimal .nav-logo-dot { color: #111827 !important; font-style: normal !important; text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 4px; }
+    body.tpl-minimal .hero { background: #fff; }
+    body.tpl-minimal .hero-card, body.tpl-minimal .pricing-card, body.tpl-minimal .pillar-card, body.tpl-minimal .feature-card, body.tpl-minimal .faq-item, body.tpl-minimal .problem-card, body.tpl-minimal .use-case-card {
+      border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: none; background: #fff;
+    }
+    body.tpl-minimal h1, body.tpl-minimal h2, body.tpl-minimal h3 { letter-spacing: -.02em; }
+    body.tpl-minimal section { background: #fff !important; }
+    body.tpl-minimal section:nth-of-type(even) { background: #f8fafc !important; }
+    body.tpl-minimal .eyebrow, body.tpl-minimal .price-badge { background: #f1f5f9; color: #111827; border: 1px solid #e2e8f0; }
+    body.tpl-minimal .price-amount, body.tpl-minimal .pricing-amount { color: #111827; }
+
+    /* ═══════════ TEMPLATE: BOLD (dark, gradient, energetic) ═══════════ */
+    body.tpl-bold { background: #0a0a0f; color: #f1f5f9; font-family: 'Plus Jakarta Sans', sans-serif; }
+    body.tpl-bold .promo-bar { background: linear-gradient(90deg,#f59e0b,#ef4444,#a855f7); color: #fff; font-weight: 700; }
+    body.tpl-bold nav { background: rgba(10,10,15,.85); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255,255,255,.08); box-shadow: none; }
+    body.tpl-bold nav a, body.tpl-bold .nav-logo { color: #f1f5f9; }
+    body.tpl-bold .nav-logo-dot, body.tpl-bold .accent { background: linear-gradient(90deg,#a855f7,#ec4899); -webkit-background-clip: text; background-clip: text; color: transparent !important; }
+    body.tpl-bold .nav-cta, body.tpl-bold .btn-primary, body.tpl-bold .pricing-cta, body.tpl-bold .sticky-cta {
+      background: linear-gradient(135deg,#a855f7,#ec4899); color: #fff; border-radius: 999px; box-shadow: 0 10px 40px rgba(168,85,247,.45); font-weight: 800;
+    }
+    body.tpl-bold .btn-secondary { border: 1px solid rgba(255,255,255,.2); color: #f1f5f9; background: rgba(255,255,255,.03); border-radius: 999px; }
+    body.tpl-bold .hero { background: radial-gradient(ellipse at top, rgba(168,85,247,.18) 0%, transparent 60%), #0a0a0f; }
+    body.tpl-bold section { background: #0a0a0f !important; color: #f1f5f9; }
+    body.tpl-bold section:nth-of-type(odd) { background: #11111a !important; }
+    body.tpl-bold h1, body.tpl-bold h2, body.tpl-bold h3 { color: #f8fafc; }
+    body.tpl-bold p, body.tpl-bold li, body.tpl-bold .faq-q, body.tpl-bold .faq-a { color: #cbd5e1; }
+    body.tpl-bold .hero-card, body.tpl-bold .pricing-card, body.tpl-bold .pillar-card, body.tpl-bold .feature-card, body.tpl-bold .faq-item, body.tpl-bold .problem-card, body.tpl-bold .use-case-card {
+      background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 18px; box-shadow: 0 8px 40px rgba(0,0,0,.4); color: #f1f5f9;
+    }
+    body.tpl-bold .pricing-card { background: linear-gradient(135deg, rgba(168,85,247,.15), rgba(236,72,153,.08)); border: 1px solid rgba(168,85,247,.4); }
+    body.tpl-bold .eyebrow, body.tpl-bold .price-badge { background: rgba(168,85,247,.15); color: #e9d5ff; border: 1px solid rgba(168,85,247,.3); }
+    body.tpl-bold .price-amount, body.tpl-bold .pricing-amount { background: linear-gradient(135deg,#a855f7,#ec4899); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    body.tpl-bold footer { background: #050508; color: #94a3b8; border-top: 1px solid rgba(255,255,255,.06); }
+
   </style>
 </head>
-<body>
+<body class="tpl-default">
 
   <!-- Promo Bar -->
   <div class="promo-bar">
@@ -1260,6 +1305,10 @@
         // Branding
         if (d.branding) {
           var b = d.branding;
+          if (b.template) {
+            document.body.className = 'tpl-' + b.template;
+            window.__LP_TEMPLATE__ = b.template;
+          }
           if (b.page_title) {
             document.title = b.page_title;
             var t = el('lp-page-title'); if (t) t.textContent = b.page_title;
@@ -1347,6 +1396,104 @@
         }
       })
       .catch(function() { /* fail silently — show default HTML content */ });
+  })();
+  </script>
+
+  <!-- Analytics tracker -->
+  <script>
+  (function() {
+    var API_URL = 'https://apps.adminpintar.id/api/lp-track';
+    var SS_KEY = '_lp_sid';
+    function uuid() {
+      return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+    var sid = sessionStorage.getItem(SS_KEY);
+    if (!sid) { sid = uuid(); sessionStorage.setItem(SS_KEY, sid); }
+    var startTs = Date.now();
+    var maxScroll = 0;
+    var lastSentScroll = -1;
+
+    function detectDevice() {
+      var w = window.innerWidth;
+      if (w < 640) return 'mobile';
+      if (w < 1024) return 'tablet';
+      return 'desktop';
+    }
+
+    function send(payload, useBeacon) {
+      try {
+        var body = JSON.stringify(Object.assign({
+          session_id: sid,
+          template: window.__LP_TEMPLATE__ || 'default',
+          path: location.pathname,
+          referrer: document.referrer || '',
+          viewport_w: window.innerWidth,
+          viewport_h: window.innerHeight,
+          device: detectDevice(),
+        }, payload));
+        if (useBeacon && navigator.sendBeacon) {
+          var blob = new Blob([body], { type: 'application/json' });
+          navigator.sendBeacon(API_URL, blob);
+        } else {
+          fetch(API_URL, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: body, keepalive: true });
+        }
+      } catch (e) {}
+    }
+
+    // Initial pageview
+    send({ event_type: 'pageview' });
+
+    // Heartbeat — every 15s, send duration
+    var hbTimer = setInterval(function() {
+      if (document.hidden) return;
+      send({ event_type: 'heartbeat', duration_ms: Date.now() - startTs });
+    }, 15000);
+
+    // Scroll depth
+    window.addEventListener('scroll', function() {
+      var h = document.documentElement;
+      var pct = Math.round((h.scrollTop + window.innerHeight) / h.scrollHeight * 100);
+      if (pct > maxScroll) maxScroll = pct;
+      // throttle: send at 25/50/75/100 thresholds
+      var bucket = Math.floor(maxScroll / 25) * 25;
+      if (bucket > lastSentScroll && bucket >= 25) {
+        lastSentScroll = bucket;
+        send({ event_type: 'scroll', scroll_pct: bucket });
+      }
+    }, { passive: true });
+
+    // Clicks on key CTAs
+    function getClickTarget(el) {
+      while (el && el !== document.body) {
+        if (el.classList) {
+          if (el.classList.contains('lp-activation-link')) return 'activation';
+          if (el.classList.contains('lp-wa-link')) return 'whatsapp';
+          if (el.classList.contains('sticky-cta')) return 'sticky';
+          if (el.classList.contains('nav-cta')) return 'nav-cta';
+          if (el.classList.contains('faq-q')) return 'faq-open';
+          if (el.classList.contains('nav-logo')) return 'logo';
+        }
+        if (el.tagName === 'A' && el.getAttribute('href') && el.getAttribute('href').indexOf('#') === 0) {
+          return 'nav:' + el.getAttribute('href').slice(1);
+        }
+        el = el.parentElement;
+      }
+      return '';
+    }
+    document.addEventListener('click', function(e) {
+      var t = getClickTarget(e.target);
+      if (t) send({ event_type: 'click', target: t });
+    }, true);
+
+    // Final unload — duration + max scroll
+    function onLeave() {
+      clearInterval(hbTimer);
+      send({ event_type: 'unload', duration_ms: Date.now() - startTs, scroll_pct: maxScroll }, true);
+    }
+    window.addEventListener('pagehide', onLeave);
+    window.addEventListener('beforeunload', onLeave);
   })();
   </script>
 
