@@ -3389,7 +3389,125 @@ LP_DEFAULTS = {
         "final_cta_primary": "Aktivasi Lisensi — Rp 49.000/bln",
         "final_cta_secondary": "Tanya dulu via WhatsApp",
     },
+    "trial": {
+        "enabled": True,
+        "cta_text": "Coba Gratis 14 Hari",
+    },
 }
+
+# ============================================================
+# DEMO / TRIAL REGISTRATION (Public)
+# ============================================================
+
+class DemoRegisterRequest(BaseModel):
+    name: str
+    phone: str
+    email: Optional[str] = ""
+
+@api_router.post("/public/demo-register")
+async def demo_register(req: DemoRegisterRequest):
+    """Public endpoint: create a 14-day demo user + license, no auth required."""
+    name = req.name.strip()
+    phone = req.phone.strip()
+    email = req.email.strip() if req.email else ""
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Nama tidak boleh kosong.")
+    if not phone:
+        raise HTTPException(status_code=400, detail="Nomor WhatsApp tidak boleh kosong.")
+
+    # Rate limit: max 3 registrations per phone per hour
+    rate_limit("demo_register", phone, max_attempts=3, window_seconds=3600)
+
+    # Generate username from phone digits
+    digits = re.sub(r'\D', '', phone)
+    if len(digits) >= 4:
+        suffix = digits[-8:]
+        base_username = f"demo{suffix}"
+    else:
+        safe_name = re.sub(r'[^a-z0-9]', '', name.lower())[:12]
+        base_username = f"demo{safe_name}" if safe_name else "demotrial"
+
+    username = base_username
+    existing = await db.users.find_one({"username": username})
+    if existing:
+        rand_suffix = ''.join(secrets.choice("0123456789") for _ in range(3))
+        username = f"{base_username}{rand_suffix}"
+        # Retry once more if still taken
+        if await db.users.find_one({"username": username}):
+            rand_suffix = ''.join(secrets.choice("0123456789") for _ in range(3))
+            username = f"{base_username}{rand_suffix}"
+
+    password = secrets.token_urlsafe(6)
+
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id,
+        "username": username,
+        "fullName": name,
+        "email": email,
+        "phone": phone,
+        "role": "user",
+        "isActive": True,
+        "passwordHash": hash_password(password),
+        "webhookToken": secrets.token_urlsafe(16),
+        "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "lastLogin": None,
+        "is_demo": True,
+    }
+    await db.users.insert_one(user_doc)
+
+    # Generate demo license key
+    key = "DEMO-" + "-".join(
+        "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(4))
+        for _ in range(3)
+    )
+
+    expires_at = datetime.utcnow() + timedelta(days=14)
+
+    # Create chatbot license record
+    await db.chatbot_licenses.insert_one({
+        "license_key": key,
+        "product_code": "adminpintar_chatbot",
+        "customer_name": name,
+        "customer_phone": phone,
+        "customer_email": email,
+        "plan_name": "trial",
+        "status": "active",
+        "max_activations": 1,
+        "activations_used": 1,
+        "expires_at": expires_at,
+        "notes": "Demo 14 hari otomatis",
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        "created_by": "system_demo",
+    })
+
+    # Activate license for this user in db.license
+    await db.license.insert_one({
+        "userId": user_id,
+        "valid": True,
+        "status": "active",
+        "licenseKey": key,
+        "customerName": name,
+        "planName": "Trial",
+        "expiresAt": expires_at.strftime("%Y-%m-%d"),
+        "maxActivations": 1,
+        "activationsUsed": 1,
+        "productCode": "adminpintar_chatbot",
+        "instanceId": str(uuid.uuid4()),
+    })
+
+    await add_log("DEMO_REGISTERED", f"Demo user '{username}' dibuat untuk '{name}' ({phone})")
+
+    return {
+        "success": True,
+        "username": username,
+        "password": password,
+        "license_key": key,
+        "expires_at": expires_at.strftime("%Y-%m-%d"),
+        "message": f"Akun demo berhasil dibuat! Aktif 14 hari hingga {expires_at.strftime('%d %B %Y')}.",
+    }
 
 @api_router.get("/lp-content")
 async def get_lp_content():
