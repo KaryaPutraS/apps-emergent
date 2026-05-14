@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Save, Globe, Plus, Trash2, GripVertical, ExternalLink, RefreshCw, Eye } from 'lucide-react';
+import { Save, Globe, Plus, Trash2, GripVertical, ExternalLink, RefreshCw, Eye, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { getToken } from '../api/apiClient';
@@ -83,11 +83,123 @@ const FeatureList = ({ items, onChange, placeholder = 'Fitur...' }) => {
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'hero',    label: '🏠 Hero & Promo' },
-  { id: 'pricing', label: '💰 Harga' },
-  { id: 'faq',     label: '❓ FAQ' },
-  { id: 'links',   label: '🔗 Link & CTA' },
+  { id: 'branding', label: '🎨 Branding' },
+  { id: 'hero',     label: '🏠 Hero & Promo' },
+  { id: 'pricing',  label: '💰 Harga' },
+  { id: 'faq',      label: '❓ FAQ' },
+  { id: 'links',    label: '🔗 Link & CTA' },
 ];
+
+// ─── File → DataURL helper ─────────────────────────────────────────────────
+const fileToDataUrl = (file, maxBytes = 512 * 1024) => new Promise((resolve, reject) => {
+  if (file.size > maxBytes) {
+    reject(new Error(`Ukuran file maksimal ${Math.round(maxBytes / 1024)} KB`));
+    return;
+  }
+  const r = new FileReader();
+  r.onload = () => resolve(r.result);
+  r.onerror = () => reject(new Error('Gagal membaca file'));
+  r.readAsDataURL(file);
+});
+
+const ImageUploader = ({ value, onChange, label, hint, maxKB = 512, previewBg = 'bg-slate-100' }) => {
+  const inputRef = React.useRef(null);
+  const handle = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    try {
+      const url = await fileToDataUrl(f, maxKB * 1024);
+      onChange(url);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+  return (
+    <div>
+      <Label hint={hint}>{label}</Label>
+      <div className="flex items-center gap-3">
+        <div className={`w-20 h-20 rounded-lg border border-slate-200 flex items-center justify-center overflow-hidden ${previewBg}`}>
+          {value ? (
+            <img src={value} alt="" className="max-w-full max-h-full object-contain" />
+          ) : (
+            <ImageIcon className="w-7 h-7 text-slate-300" />
+          )}
+        </div>
+        <div className="flex flex-col gap-2">
+          <input ref={inputRef} type="file" accept="image/*" onChange={handle} className="hidden" />
+          <button onClick={() => inputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg border border-emerald-200">
+            <Upload className="w-3.5 h-3.5" /> {value ? 'Ganti gambar' : 'Pilih gambar'}
+          </button>
+          {value && (
+            <button onClick={() => onChange('')}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-500 hover:text-red-700">
+              <X className="w-3.5 h-3.5" /> Hapus
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Tab: Branding ─────────────────────────────────────────────────────────
+const BrandingTab = ({ data, onChange }) => {
+  const b = data.branding || {};
+  const set = (k, v) => onChange({ ...data, branding: { ...b, [k]: v } });
+  return (
+    <div className="space-y-4">
+      <Card title="Identitas Halaman">
+        <div>
+          <Label hint="Muncul di tab browser & hasil pencarian Google">Judul Halaman (Title)</Label>
+          <Input value={b.page_title} onChange={v => set('page_title', v)} placeholder="AdminPintar.id — ..." />
+        </div>
+      </Card>
+
+      <Card title="Favicon (Ikon Tab Browser)">
+        <ImageUploader
+          label="Favicon"
+          hint="Format PNG/SVG/ICO · ukuran ideal 64×64 · maks 256 KB"
+          value={b.favicon_url}
+          onChange={v => set('favicon_url', v)}
+          maxKB={256}
+          previewBg="bg-white"
+        />
+      </Card>
+
+      <Card title="Logo di Landing Page">
+        <ImageUploader
+          label="Logo"
+          hint="Tampil di navbar & footer. PNG transparan, tinggi ideal 64px. Maks 512 KB. Jika kosong, akan pakai teks brand di bawah."
+          value={b.logo_url}
+          onChange={v => set('logo_url', v)}
+          maxKB={512}
+        />
+        <div className="text-xs text-slate-500 -mt-2">
+          💡 Jika logo diisi, teks brand di bawah akan disembunyikan otomatis.
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label hint="bagian utama">Teks Brand</Label>
+            <Input value={b.brand_name} onChange={v => set('brand_name', v)} placeholder="AdminPintar" />
+          </div>
+          <div>
+            <Label hint="bagian akhir berwarna">Suffix Brand</Label>
+            <Input value={b.brand_suffix} onChange={v => set('brand_suffix', v)} placeholder=".id" />
+          </div>
+        </div>
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div className="text-xs text-slate-500 mb-1">Pratinjau teks brand:</div>
+          <div className="text-lg font-bold text-slate-900">
+            {b.brand_name || 'AdminPintar'}<span className="text-emerald-500">{b.brand_suffix || '.id'}</span>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+};
 
 // ─── Tab: Hero ─────────────────────────────────────────────────────────────
 const HeroTab = ({ data, onChange }) => {
@@ -307,7 +419,7 @@ const LinksTab = ({ data, onChange }) => {
 
 // ─── Main Page ─────────────────────────────────────────────────────────────
 const LPEditor = () => {
-  const [activeTab, setActiveTab] = useState('hero');
+  const [activeTab, setActiveTab] = useState('branding');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -400,10 +512,11 @@ const LPEditor = () => {
       {/* Tab content */}
       {data && (
         <div>
-          {activeTab === 'hero'    && <HeroTab    data={data} onChange={handleChange} />}
-          {activeTab === 'pricing' && <PricingTab data={data} onChange={handleChange} />}
-          {activeTab === 'faq'     && <FAQTab     data={data} onChange={handleChange} />}
-          {activeTab === 'links'   && <LinksTab   data={data} onChange={handleChange} />}
+          {activeTab === 'branding' && <BrandingTab data={data} onChange={handleChange} />}
+          {activeTab === 'hero'     && <HeroTab     data={data} onChange={handleChange} />}
+          {activeTab === 'pricing'  && <PricingTab  data={data} onChange={handleChange} />}
+          {activeTab === 'faq'      && <FAQTab      data={data} onChange={handleChange} />}
+          {activeTab === 'links'    && <LinksTab    data={data} onChange={handleChange} />}
         </div>
       )}
 

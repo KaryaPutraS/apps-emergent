@@ -3078,6 +3078,13 @@ async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
 # ============================================================
 
 LP_DEFAULTS = {
+    "branding": {
+        "page_title": "AdminPintar.id — Asisten WhatsApp Otomatis untuk Bisnis Anda",
+        "brand_name": "AdminPintar",
+        "brand_suffix": ".id",
+        "favicon_url": "",
+        "logo_url": "",
+    },
     "promo_bar": "PROMO LAUNCHING — Hemat 50% · Rp 99.000 → <strong>Rp 49.000/bulan</strong>",
     "hero": {
         "eyebrow": "Chatbot WhatsApp · UMKM Indonesia",

@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AdminPintar.id — Asisten WhatsApp Otomatis untuk Bisnis Anda</title>
+  <title id="lp-page-title">AdminPintar.id — Asisten WhatsApp Otomatis untuk Bisnis Anda</title>
   <meta name="description" content="Balas pesan pelanggan otomatis 24 jam via WhatsApp. Tanpa coding, langsung aktif dalam 5 menit. Mulai hanya Rp49.000/bulan." />
+  <link rel="icon" id="lp-favicon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E💬%3C/text%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -777,7 +778,7 @@
   <!-- Nav -->
   <nav>
     <div class="nav-inner">
-      <a href="#" class="nav-logo">AdminPintar<span class="nav-logo-dot">.id</span></a>
+      <a href="#" class="nav-logo lp-brand-logo"><img class="lp-logo-img" alt="" style="display:none;height:32px;width:auto;vertical-align:middle" /><span class="lp-brand-text"><span id="" class="lp-brand-name">AdminPintar</span><span class="nav-logo-dot lp-brand-suffix">.id</span></span></a>
       <ul class="nav-links">
         <li><a href="#fitur">Fitur</a></li>
         <li><a href="#harga">Harga</a></li>
@@ -1169,7 +1170,7 @@
   <footer>
     <div class="footer-inner">
       <div class="footer-brand">
-        <a href="#" class="nav-logo">AdminPintar<span class="nav-logo-dot">.id</span></a>
+        <a href="#" class="nav-logo lp-brand-logo"><img class="lp-logo-img" alt="" style="display:none;height:32px;width:auto;vertical-align:middle" /><span class="lp-brand-text"><span id="" class="lp-brand-name">AdminPintar</span><span class="nav-logo-dot lp-brand-suffix">.id</span></span></a>
         <p>Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.</p>
       </div>
       <div class="footer-col">
@@ -1256,6 +1257,27 @@
     fetch(API_URL)
       .then(function(r) { return r.json(); })
       .then(function(d) {
+        // Branding
+        if (d.branding) {
+          var b = d.branding;
+          if (b.page_title) {
+            document.title = b.page_title;
+            var t = el('lp-page-title'); if (t) t.textContent = b.page_title;
+          }
+          if (b.favicon_url) {
+            var f = el('lp-favicon'); if (f) f.href = b.favicon_url;
+          }
+          if (b.logo_url) {
+            document.querySelectorAll('.lp-logo-img').forEach(function(img) {
+              img.src = b.logo_url; img.style.display = 'inline-block';
+            });
+            document.querySelectorAll('.lp-brand-text').forEach(function(s) { s.style.display = 'none'; });
+          } else {
+            document.querySelectorAll('.lp-brand-name').forEach(function(s) { if (b.brand_name) s.textContent = b.brand_name; });
+            document.querySelectorAll('.lp-brand-suffix').forEach(function(s) { if (b.brand_suffix) s.textContent = b.brand_suffix; });
+          }
+        }
+
         // Promo bar
         setHtml('lp-promo-text', d.promo_bar);
 
