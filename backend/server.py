@@ -3075,7 +3075,7 @@ async def _call_anthropic(model: str, api_key: str, system_prompt: str,
 # WAHA PROXY
 # ============================================================
 
-async def get_waha_config(uid: str = ""):
+async def _get_user_waha_config(uid: str = ""):
     cfg = await _get_user_config(uid) if uid else {}
     url = cfg.get("wahaUrl", "").rstrip("/")
     session = cfg.get("wahaSession", "default") or "default"
@@ -3092,7 +3092,7 @@ def waha_headers(api_key: str) -> dict:
 
 @api_router.get("/waha/status")
 async def waha_status(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
@@ -3112,7 +3112,7 @@ async def waha_status(current_user: Dict = Depends(get_current_user)):
 
 @api_router.get("/waha/qr")
 async def waha_qr(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
@@ -3132,7 +3132,7 @@ async def waha_qr(current_user: Dict = Depends(get_current_user)):
 
 @api_router.post("/waha/start")
 async def waha_start(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.post(
@@ -3156,7 +3156,7 @@ async def waha_start(current_user: Dict = Depends(get_current_user)):
 
 @api_router.post("/waha/stop")
 async def waha_stop(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(
@@ -3173,7 +3173,7 @@ async def waha_stop(current_user: Dict = Depends(get_current_user)):
 
 @api_router.get("/waha/webhook")
 async def waha_get_webhook(current_user: Dict = Depends(get_current_user)):
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(f"{waha_url}/api/sessions/{session}", headers=waha_headers(api_key))
@@ -3194,7 +3194,7 @@ async def waha_get_webhook(current_user: Dict = Depends(get_current_user)):
 @api_router.get("/waha/debug")
 async def waha_debug(current_user: Dict = Depends(get_current_user)):
     """Return raw WAHA session info and available routes for debugging."""
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     results = {}
     endpoints_to_probe = [
         ("GET", f"/api/sessions/{session}"),
@@ -3221,7 +3221,7 @@ async def waha_debug(current_user: Dict = Depends(get_current_user)):
 async def waha_contact_debug(chat_id: str, current_user: Dict = Depends(get_current_user)):
     """Debug: fetch raw WAHA response for a specific chatId (useful for @lid resolution)."""
     from urllib.parse import quote as _uq
-    waha_url, session, api_key = await get_waha_config(current_user["userId"])
+    waha_url, session, api_key = await _get_user_waha_config(current_user["userId"])
     if not waha_url:
         return {"error": "WAHA URL not configured"}
     results = {}
@@ -3253,7 +3253,7 @@ async def waha_contact_debug(chat_id: str, current_user: Dict = Depends(get_curr
 @api_router.post("/waha/webhook")
 async def waha_set_webhook(current_user: Dict = Depends(get_current_user)):
     uid = current_user["userId"]
-    waha_url, session, api_key = await get_waha_config(uid)
+    waha_url, session, api_key = await _get_user_waha_config(uid)
 
     # Get user's webhook token
     user = await db.users.find_one({"id": uid})
