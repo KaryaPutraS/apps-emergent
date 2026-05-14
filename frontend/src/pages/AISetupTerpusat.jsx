@@ -13,12 +13,66 @@ import apiClient from '../api/apiClient';
 const PROVIDERS = ['GEMINI', 'OPENAI', 'DEEPSEEK', 'GROQ', 'OPENROUTER', 'OLLAMA'];
 
 const PROVIDER_MODELS = {
-  GEMINI: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'],
-  OPENAI: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-  DEEPSEEK: ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'],
-  GROQ: ['llama-3.1-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-  OPENROUTER: ['openai/gpt-4o-mini', 'anthropic/claude-3-haiku', 'meta-llama/llama-3.1-8b-instruct:free'],
-  OLLAMA: ['llama3.2', 'llama3.1', 'mistral', 'phi3', 'qwen2.5'],
+  GEMINI: [
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-exp',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+    'gemini-1.5-pro',
+    'gemini-pro',
+  ],
+  OPENAI: [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4-turbo',
+    'gpt-4',
+    'gpt-3.5-turbo',
+    'o1-preview',
+    'o1-mini',
+  ],
+  DEEPSEEK: [
+    'deepseek-chat',
+    'deepseek-reasoner',
+    'deepseek-coder',
+    'deepseek-v3',
+    'deepseek-v3-flash',
+  ],
+  GROQ: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-70b-versatile',
+    'llama-3.1-8b-instant',
+    'llama-3-70b-8192',
+    'llama-3-8b-8192',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+    'gemma-7b-it',
+  ],
+  OPENROUTER: [
+    'openai/gpt-4o',
+    'openai/gpt-4o-mini',
+    'anthropic/claude-3.5-sonnet',
+    'anthropic/claude-3-haiku',
+    'google/gemini-pro-1.5',
+    'meta-llama/llama-3.1-405b-instruct',
+    'meta-llama/llama-3.1-70b-instruct',
+    'meta-llama/llama-3.1-8b-instruct:free',
+    'mistralai/mistral-large',
+    'deepseek/deepseek-chat',
+  ],
+  OLLAMA: [
+    'llama3.3',
+    'llama3.2',
+    'llama3.1',
+    'llama3',
+    'mistral',
+    'phi3',
+    'phi3.5',
+    'qwen2.5',
+    'qwen2.5-coder',
+    'gemma2',
+    'codellama',
+  ],
 };
 
 const PROVIDER_COLORS = {
@@ -70,6 +124,49 @@ function SectionCard({ title, icon: Icon, iconColor = 'text-blue-500', children 
   );
 }
 
+function ModelSelect({ models, value, onChange }) {
+  const isCustom = value && !models.includes(value);
+  const [customMode, setCustomMode] = useState(isCustom);
+
+  useEffect(() => {
+    if (value && !models.includes(value)) setCustomMode(true);
+  }, [value, models]);
+
+  if (customMode) {
+    return (
+      <div className="flex gap-2">
+        <input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="Ketik nama model custom..."
+          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          type="button"
+          onClick={() => { setCustomMode(false); onChange(models[0] || ''); }}
+          className="px-3 py-2 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
+        >
+          Pilih
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <select
+      value={value || ''}
+      onChange={e => {
+        if (e.target.value === '__custom__') { setCustomMode(true); onChange(''); }
+        else onChange(e.target.value);
+      }}
+      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+    >
+      {models.map(m => <option key={m} value={m}>{m}</option>)}
+      <option value="__custom__">— Custom (ketik manual)...</option>
+    </select>
+  );
+}
+
 function ProviderConfig({ prefix, values, onChange }) {
   const provider = values[`${prefix}provider`] || 'GEMINI';
   const models = PROVIDER_MODELS[provider] || [];
@@ -94,16 +191,11 @@ function ProviderConfig({ prefix, values, onChange }) {
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-          <input
-            list={`${prefix}models`}
+          <ModelSelect
+            models={models}
             value={values[`${prefix}model`] || ''}
-            onChange={e => onChange(`${prefix}model`, e.target.value)}
-            placeholder="Ketik atau pilih model..."
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onChange={v => onChange(`${prefix}model`, v)}
           />
-          <datalist id={`${prefix}models`}>
-            {models.map(m => <option key={m} value={m} />)}
-          </datalist>
         </div>
       </div>
       <div>
