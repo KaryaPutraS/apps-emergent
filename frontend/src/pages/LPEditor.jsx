@@ -145,6 +145,26 @@ const TEMPLATES = [
       </div>
     ),
   },
+  {
+    id: 'editorial',
+    name: 'Editorial Orange',
+    desc: 'Dark + orange + serif italic + grain texture. Aesthetic editorial magazine. Premium feel.',
+    accent: 'bg-orange-500',
+    preview: (
+      <div className="bg-[#0A0A0F] border border-orange-900/50 rounded p-3 h-32 flex flex-col gap-1.5 relative overflow-hidden" style={{fontFamily:'Georgia,serif'}}>
+        <div className="absolute -top-8 -right-8 w-24 h-24 rounded-full" style={{background:'radial-gradient(circle,rgba(255,107,53,0.25),transparent 70%)',filter:'blur(8px)'}} />
+        <div className="relative flex items-center justify-between">
+          <div className="text-xs italic text-[#F5F0E8]">adminpintar<span className="inline-block w-1 h-1 bg-orange-500 rounded-full mx-0.5 align-middle" />id</div>
+          <div className="text-[8px] uppercase tracking-widest text-[#F5F0E8] border border-white/15 px-1.5 py-0.5 rounded-sm" style={{fontFamily:'monospace'}}>Aktivasi</div>
+        </div>
+        <div className="relative text-[11px] italic text-[#F5F0E8] leading-tight mt-1">Chatbot WA <span className="text-orange-500 italic">atur diri</span> sendiri.</div>
+        <div className="relative flex items-center gap-1 mt-auto">
+          <div className="bg-orange-500 text-[8px] text-[#0A0A0F] px-1.5 py-0.5 font-bold rounded-sm">Aktifkan →</div>
+          <div className="text-[8px] uppercase tracking-widest text-orange-500" style={{fontFamily:'monospace'}}>━ promo</div>
+        </div>
+      </div>
+    ),
+  },
 ];
 
 const TemplateTab = ({ data, onChange }) => {

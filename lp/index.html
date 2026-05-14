@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -810,6 +811,253 @@
     body.tpl-bold .eyebrow, body.tpl-bold .price-badge { background: rgba(168,85,247,.15); color: #e9d5ff; border: 1px solid rgba(168,85,247,.3); }
     body.tpl-bold .price-amount, body.tpl-bold .pricing-amount { background: linear-gradient(135deg,#a855f7,#ec4899); -webkit-background-clip: text; background-clip: text; color: transparent; }
     body.tpl-bold footer { background: #050508; color: #94a3b8; border-top: 1px solid rgba(255,255,255,.06); }
+
+    /* ═══════════ TEMPLATE: EDITORIAL (dark + orange + serif italic + grain) ═══════════ */
+    body.tpl-editorial {
+      --ed-bg: #0A0A0F; --ed-bg-soft: #14141C; --ed-bg-card: #1A1A24;
+      --ed-ink: #F5F0E8; --ed-ink-mute: #8B8B95; --ed-ink-dim: #5A5A66;
+      --ed-accent: #FF6B35; --ed-accent-soft: #FFB199; --ed-accent-glow: rgba(255,107,53,.15);
+      --ed-line: rgba(245,240,232,.08); --ed-line-strong: rgba(245,240,232,.15);
+      --ed-serif: 'Instrument Serif', Georgia, serif;
+      --ed-sans: 'Geist', -apple-system, sans-serif;
+      --ed-mono: 'Geist Mono', 'SF Mono', monospace;
+      background: var(--ed-bg) !important; color: var(--ed-ink);
+      font-family: var(--ed-sans); letter-spacing: -.01em;
+    }
+    body.tpl-editorial::before {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 100;
+      opacity: .04; mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    body.tpl-editorial ::selection { background: var(--ed-accent); color: var(--ed-bg); }
+
+    /* Headlines — serif */
+    body.tpl-editorial h1, body.tpl-editorial h2, body.tpl-editorial h3,
+    body.tpl-editorial .hero-headline, body.tpl-editorial .section-title,
+    body.tpl-editorial .problem-title, body.tpl-editorial .pillar-title,
+    body.tpl-editorial .feature-title, body.tpl-editorial .use-case-title,
+    body.tpl-editorial .pricing-name, body.tpl-editorial .faq-q,
+    body.tpl-editorial .final-h1, body.tpl-editorial .final-h2 {
+      font-family: var(--ed-serif) !important; font-weight: 400 !important;
+      line-height: 1.05; letter-spacing: -.03em;
+    }
+    body.tpl-editorial .accent, body.tpl-editorial .italic, body.tpl-editorial .nav-logo-dot,
+    body.tpl-editorial .lp-brand-suffix {
+      color: var(--ed-accent) !important; font-style: italic !important;
+      background: none !important; -webkit-text-fill-color: var(--ed-accent) !important;
+    }
+
+    /* Promo bar */
+    body.tpl-editorial .promo-bar {
+      background: var(--ed-accent) !important; color: var(--ed-bg) !important;
+      font-family: var(--ed-sans); font-size: .78rem; font-weight: 500;
+      letter-spacing: .02em; text-align: center; padding: .65rem 1rem;
+    }
+    body.tpl-editorial .promo-bar strong { color: var(--ed-bg); }
+
+    /* Nav */
+    body.tpl-editorial nav {
+      background: var(--ed-bg); border-bottom: 1px solid var(--ed-line); box-shadow: none;
+      padding: 1.25rem 0;
+    }
+    body.tpl-editorial .nav-logo, body.tpl-editorial .lp-brand-name {
+      font-family: var(--ed-serif); font-style: italic; font-size: 1.5rem;
+      color: var(--ed-ink) !important; letter-spacing: -.02em;
+    }
+    body.tpl-editorial .nav-links a { color: var(--ed-ink-mute); }
+    body.tpl-editorial .nav-links a:hover { color: var(--ed-ink); }
+    body.tpl-editorial .nav-cta {
+      font-family: var(--ed-mono); font-size: .7rem; letter-spacing: .15em;
+      text-transform: uppercase; color: var(--ed-ink) !important;
+      padding: .5rem 1rem; border: 1px solid var(--ed-line-strong);
+      border-radius: 4px; background: transparent; box-shadow: none;
+    }
+    body.tpl-editorial .nav-cta:hover { background: var(--ed-ink); color: var(--ed-bg) !important; }
+
+    /* Eyebrow */
+    body.tpl-editorial .hero-eyebrow, body.tpl-editorial .eyebrow, body.tpl-editorial .section-eyebrow {
+      font-family: var(--ed-mono); font-size: .7rem; letter-spacing: .18em;
+      text-transform: uppercase; color: var(--ed-accent);
+      display: inline-flex; align-items: center; gap: .5rem;
+      background: transparent !important; padding: 0 !important; border: none !important;
+    }
+    body.tpl-editorial .hero-eyebrow::before, body.tpl-editorial .eyebrow::before {
+      content: ''; width: 1.5rem; height: 1px; background: var(--ed-accent);
+    }
+
+    /* Hero */
+    body.tpl-editorial .hero {
+      background: var(--ed-bg) !important; position: relative; overflow: hidden;
+      padding: clamp(3rem, 8vw, 7rem) 0 clamp(4rem, 10vw, 8rem);
+    }
+    body.tpl-editorial .hero::before {
+      content: ''; position: absolute; width: 800px; height: 800px; border-radius: 50%;
+      background: radial-gradient(circle, var(--ed-accent-glow) 0%, transparent 60%);
+      top: -200px; right: -300px; pointer-events: none; filter: blur(40px);
+      animation: edFloat 12s ease-in-out infinite;
+    }
+    @keyframes edFloat {
+      0%,100% { transform: translate(0,0) scale(1); }
+      50% { transform: translate(-50px,30px) scale(1.1); }
+    }
+    body.tpl-editorial .hero-headline {
+      font-size: clamp(2.5rem, 10vw, 7rem); line-height: .95; letter-spacing: -.04em;
+      color: var(--ed-ink);
+    }
+    body.tpl-editorial .hero-sub { color: var(--ed-ink-mute); font-size: clamp(1rem, 2vw, 1.15rem); }
+    body.tpl-editorial .hero-sub strong { color: var(--ed-ink); font-weight: 500; }
+    body.tpl-editorial .hero-actions, body.tpl-editorial .final-actions { gap: 1rem; }
+    body.tpl-editorial .btn-primary, body.tpl-editorial .pricing-cta, body.tpl-editorial .sticky-cta {
+      background: var(--ed-accent) !important; color: var(--ed-bg) !important;
+      border-radius: 4px !important; font-weight: 600 !important;
+      box-shadow: none !important; padding: 1rem 1.5rem;
+      font-family: var(--ed-sans); letter-spacing: -.01em;
+    }
+    body.tpl-editorial .btn-primary:hover { transform: translateY(-2px); }
+    body.tpl-editorial .btn-secondary {
+      border: 1px solid var(--ed-line-strong); color: var(--ed-ink) !important;
+      background: transparent !important; border-radius: 4px !important;
+      padding: 1rem 1.25rem; font-weight: 400;
+    }
+    body.tpl-editorial .btn-secondary:hover { border-color: var(--ed-ink-mute); background: var(--ed-bg-soft) !important; }
+
+    /* Hero card */
+    body.tpl-editorial .hero-card {
+      background: var(--ed-bg-soft) !important; border: 1px solid var(--ed-line) !important;
+      border-radius: 8px !important; box-shadow: none !important;
+      position: relative; overflow: hidden; padding: 1.5rem;
+    }
+    body.tpl-editorial .hero-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--ed-accent), transparent);
+    }
+    body.tpl-editorial .hero-card-badge {
+      background: var(--ed-accent-glow) !important; color: var(--ed-accent) !important;
+      border: 1px solid rgba(255,107,53,.25); font-family: var(--ed-mono); font-size: .65rem;
+      letter-spacing: .15em; text-transform: uppercase;
+    }
+    body.tpl-editorial .hero-card-price { font-family: var(--ed-serif); }
+    body.tpl-editorial .hero-card-price .amount,
+    body.tpl-editorial .hero-card-price-old, body.tpl-editorial .hero-card-features { color: var(--ed-ink); }
+    body.tpl-editorial .hero-card-feature { color: var(--ed-ink); font-size: .85rem; }
+    body.tpl-editorial .hero-card-feature svg { color: var(--ed-accent); }
+    body.tpl-editorial .hero-card-note { color: var(--ed-ink-dim); }
+    body.tpl-editorial .hero-trust { color: var(--ed-ink-mute); border-top: 1px solid var(--ed-line); }
+
+    /* Sections backgrounds */
+    body.tpl-editorial section { background: var(--ed-bg) !important; color: var(--ed-ink); }
+    body.tpl-editorial section.problems, body.tpl-editorial section.features,
+    body.tpl-editorial section.use-cases, body.tpl-editorial section.faq {
+      background: var(--ed-bg-soft) !important;
+      border-top: 1px solid var(--ed-line); border-bottom: 1px solid var(--ed-line);
+    }
+    body.tpl-editorial p, body.tpl-editorial li { color: var(--ed-ink-mute); }
+    body.tpl-editorial strong { color: var(--ed-ink); }
+
+    /* Cards: problem / pillar / feature / use-case */
+    body.tpl-editorial .problem-card, body.tpl-editorial .pillar-card,
+    body.tpl-editorial .feature-card, body.tpl-editorial .use-case-card,
+    body.tpl-editorial .feature-row {
+      background: var(--ed-bg) !important; border: 1px solid var(--ed-line) !important;
+      border-radius: 6px !important; box-shadow: none !important;
+      transition: all .3s; color: var(--ed-ink);
+    }
+    body.tpl-editorial .problem-card:hover, body.tpl-editorial .use-case-card:hover,
+    body.tpl-editorial .feature-card:hover {
+      border-color: var(--ed-accent) !important; transform: translateY(-3px);
+    }
+    body.tpl-editorial .problem-icon, body.tpl-editorial .feature-visual,
+    body.tpl-editorial .use-case-icon, body.tpl-editorial .feature-icon { filter: saturate(.8); }
+    body.tpl-editorial .problem-title, body.tpl-editorial .use-case-title,
+    body.tpl-editorial .feature-title { color: var(--ed-ink); font-style: italic; }
+    body.tpl-editorial .problem-text, body.tpl-editorial .feature-desc,
+    body.tpl-editorial .use-case-desc { color: var(--ed-ink-mute); }
+    body.tpl-editorial .pillar-num {
+      font-family: var(--ed-serif); font-style: italic; color: var(--ed-accent);
+      font-size: 1rem; letter-spacing: -.02em;
+    }
+    body.tpl-editorial .pillar-card { padding: 2rem; }
+    body.tpl-editorial .pillar-title, body.tpl-editorial .pillar-card h3 {
+      font-family: var(--ed-serif); color: var(--ed-ink); font-size: 1.75rem;
+    }
+
+    /* Flow / Steps */
+    body.tpl-editorial .flow-step, body.tpl-editorial .step-card {
+      background: var(--ed-bg-soft) !important; border: 1px solid var(--ed-line) !important;
+      border-radius: 6px !important; color: var(--ed-ink);
+    }
+    body.tpl-editorial .step-num, body.tpl-editorial .flow-num {
+      font-family: var(--ed-serif); font-style: italic; color: transparent;
+      -webkit-text-stroke: 1px var(--ed-ink-dim);
+      font-size: clamp(2.5rem, 6vw, 4rem); letter-spacing: -.03em;
+    }
+    body.tpl-editorial .step-card:hover .step-num,
+    body.tpl-editorial .flow-step:hover .flow-num {
+      -webkit-text-stroke-color: var(--ed-accent); color: var(--ed-accent);
+    }
+
+    /* Pricing */
+    body.tpl-editorial .pricing-card, body.tpl-editorial .pricing {
+      background: var(--ed-bg-soft) !important; border: 1px solid var(--ed-accent) !important;
+      border-radius: 8px !important; box-shadow: 0 30px 80px -20px rgba(255,107,53,.15) !important;
+      color: var(--ed-ink);
+    }
+    body.tpl-editorial .pricing-name { color: var(--ed-ink); font-family: var(--ed-serif); }
+    body.tpl-editorial .pricing-amount, body.tpl-editorial .price-amount {
+      color: var(--ed-accent) !important; font-family: var(--ed-serif);
+      background: none !important; -webkit-text-fill-color: var(--ed-accent) !important;
+    }
+    body.tpl-editorial .pricing-old, body.tpl-editorial .price-old {
+      color: var(--ed-ink-dim); text-decoration-color: var(--ed-accent);
+    }
+    body.tpl-editorial .pricing-features li, body.tpl-editorial .pricing-list li { color: var(--ed-ink); }
+    body.tpl-editorial .pricing-features svg, body.tpl-editorial .pricing-list svg { color: var(--ed-accent); }
+    body.tpl-editorial .pricing-note, body.tpl-editorial .price-note {
+      font-family: var(--ed-serif); font-style: italic; color: var(--ed-ink-dim);
+    }
+
+    /* FAQ */
+    body.tpl-editorial .faq-item {
+      background: transparent !important; border: none !important;
+      border-bottom: 1px solid var(--ed-line) !important; border-radius: 0 !important;
+      padding: 1.5rem 0;
+    }
+    body.tpl-editorial .faq-q {
+      color: var(--ed-ink); font-family: var(--ed-serif);
+      font-size: clamp(1.1rem, 2vw, 1.35rem); line-height: 1.3;
+    }
+    body.tpl-editorial .faq-q::after { color: var(--ed-accent); font-weight: 300; }
+    body.tpl-editorial .faq-a { color: var(--ed-ink-mute); }
+    body.tpl-editorial .faq-a strong { color: var(--ed-ink); }
+
+    /* Final CTA */
+    body.tpl-editorial .final {
+      background: var(--ed-bg) !important; border-top: 1px solid var(--ed-line);
+      position: relative; overflow: hidden; text-align: center;
+    }
+    body.tpl-editorial .final::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(circle at 20% 30%, var(--ed-accent-glow), transparent 50%),
+        radial-gradient(circle at 80% 70%, rgba(96,165,250,.08), transparent 50%);
+    }
+    body.tpl-editorial .final-h1, body.tpl-editorial .final-h2 {
+      font-family: var(--ed-serif); font-size: clamp(2.5rem, 8vw, 5.5rem);
+      line-height: 1; letter-spacing: -.04em; color: var(--ed-ink);
+    }
+    body.tpl-editorial .final-sub, body.tpl-editorial .final p { color: var(--ed-ink-mute); }
+
+    /* Footer */
+    body.tpl-editorial footer {
+      background: var(--ed-bg) !important; border-top: 1px solid var(--ed-line);
+      color: var(--ed-ink-dim);
+    }
+
+    /* Sticky CTA */
+    body.tpl-editorial .sticky-cta {
+      background: var(--ed-accent) !important; color: var(--ed-bg) !important;
+      border-radius: 100px !important; box-shadow: 0 10px 30px -10px rgba(255,107,53,.5) !important;
+    }
 
   </style>
 </head>
