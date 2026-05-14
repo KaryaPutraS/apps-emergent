@@ -493,8 +493,36 @@ const FAQTab = ({ data, onChange }) => {
 const LinksTab = ({ data, onChange }) => {
   const l = data.links || {};
   const set = (k, v) => onChange({ ...data, links: { ...l, [k]: v } });
+  const trial = data.trial || { enabled: true, cta_text: 'Coba Gratis 14 Hari' };
+  const setTrial = (k, v) => onChange({ ...data, trial: { ...trial, [k]: v } });
   return (
     <div className="space-y-4">
+      <Card title="Trial / Demo Gratis">
+        <div className="flex items-center justify-between py-1">
+          <div>
+            <p className="text-sm font-medium text-slate-700">Tampilkan tombol Ujicoba Gratis di halaman login</p>
+            <p className="text-xs text-slate-400 mt-0.5">Tombol "Coba Gratis" akan muncul di bawah form login</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTrial('enabled', !trial.enabled)}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${trial.enabled ? 'bg-emerald-500' : 'bg-slate-300'}`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${trial.enabled ? 'translate-x-5' : 'translate-x-0'}`}
+            />
+          </button>
+        </div>
+        <div className={trial.enabled ? '' : 'opacity-50 pointer-events-none'}>
+          <Label hint="teks pada tombol trial di halaman login">Teks Tombol Trial</Label>
+          <Input
+            value={trial.cta_text}
+            onChange={v => setTrial('cta_text', v)}
+            placeholder="Coba Gratis 14 Hari"
+          />
+        </div>
+      </Card>
+
       <Card title="Link Penting">
         <div>
           <Label hint="format: https://wa.me/628xxx">Link WhatsApp (Tombol Tanya dulu)</Label>
