@@ -1832,12 +1832,128 @@ async def change_password(req: ChangePasswordRequest, current_user: Dict = Depen
     raise HTTPException(status_code=401, detail="Akun tidak ditemukan. Silakan login ulang.")
 
 # ============================================================
-# AI SETUP (proxy to SatroAI API)
+# AI SETUP (menggunakan AI Terpusat - dikelola superadmin)
 # ============================================================
 
-AI_SETUP_URL = "https://lisensi.satroai.pro/ai-setup"
-AI_SETUP_PRODUCT_CODE = "satroai_chatbot_manager"
-AI_SETUP_APP_VERSION = "1.1.0-secure"
+AI_SETUP_PRODUCT_CODE = "adminpintar_chatbot_manager"
+
+AI_SETUP_SYSTEM_PROMPT = (
+    "Anda adalah AI Setup Assistant untuk AdminPintar.id (manajemen chatbot WhatsApp). "
+    "Tugas Anda: membantu admin mengonfigurasi chatbot lewat percakapan natural. "
+    "Anda dapat menyiapkan draft data untuk: Rules Engine, Knowledge Base, Template Pesan, "
+    "Kontak, System Prompt AI Agent, Informasi Bisnis, Jam Operasional, dan parameter AI Agent. "
+    "Jangan pernah meminta atau mengubah API key, WAHA URL, license key, atau password. "
+    "Jika user meminta itu, jelaskan bahwa setting tersebut hanya bisa diubah lewat menu khusus. "
+    "Jawab dalam bahasa Indonesia, singkat, sopan, dan ramah."
+)
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text or "") // 4)
+
+async def _call_ai_provider(provider: str, model: str, api_key: str, base_url: str,
+                             messages: list, temperature: float, max_tokens: int) -> dict:
+    """Call AI provider, returns dict with: reply, prompt_tokens, completion_tokens, total_tokens.
+    Raises Exception on failure."""
+    provider = (provider or "").upper()
+    timeout = httpx.Timeout(60.0, connect=10.0)
+
+    if provider == "GEMINI":
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        contents = []
+        system_text = None
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "system":
+                system_text = content
+                continue
+            contents.append({
+                "role": "user" if role == "user" else "model",
+                "parts": [{"text": content}],
+            })
+        payload = {
+            "contents": contents,
+            "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+        }
+        if system_text:
+            payload["systemInstruction"] = {"parts": [{"text": system_text}]}
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+        if resp.status_code != 200:
+            raise Exception(f"Gemini error {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        reply = ""
+        if candidates:
+            parts = ((candidates[0].get("content") or {}).get("parts")) or []
+            reply = "".join(p.get("text", "") for p in parts)
+        usage = data.get("usageMetadata") or {}
+        prompt_t = int(usage.get("promptTokenCount") or 0)
+        completion_t = int(usage.get("candidatesTokenCount") or 0)
+        total_t = int(usage.get("totalTokenCount") or (prompt_t + completion_t))
+        return {"reply": reply, "prompt_tokens": prompt_t, "completion_tokens": completion_t, "total_tokens": total_t}
+
+    if provider in ("OPENAI", "DEEPSEEK", "GROQ", "OPENROUTER"):
+        base_map = {
+            "OPENAI": "https://api.openai.com/v1",
+            "DEEPSEEK": "https://api.deepseek.com/v1",
+            "GROQ": "https://api.groq.com/openai/v1",
+            "OPENROUTER": "https://openrouter.ai/api/v1",
+        }
+        api_base = (base_url or base_map[provider]).rstrip("/")
+        url = f"{api_base}/chat/completions"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            raise Exception(f"{provider} error {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        choices = data.get("choices") or []
+        reply = (choices[0].get("message") or {}).get("content", "") if choices else ""
+        usage = data.get("usage") or {}
+        return {
+            "reply": reply,
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "total_tokens": int(usage.get("total_tokens") or 0),
+        }
+
+    if provider == "OLLAMA":
+        if not base_url:
+            raise Exception("Base URL wajib diisi untuk Ollama.")
+        url = f"{base_url.rstrip('/')}/api/chat"
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+        if resp.status_code != 200:
+            raise Exception(f"Ollama error {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        reply = ((data.get("message") or {}).get("content")) or ""
+        prompt_t = int(data.get("prompt_eval_count") or 0)
+        completion_t = int(data.get("eval_count") or 0)
+        if prompt_t == 0:
+            prompt_t = sum(_estimate_tokens(m.get("content", "")) for m in messages)
+        if completion_t == 0:
+            completion_t = _estimate_tokens(reply)
+        return {
+            "reply": reply,
+            "prompt_tokens": prompt_t,
+            "completion_tokens": completion_t,
+            "total_tokens": prompt_t + completion_t,
+        }
+
+    raise Exception(f"Provider {provider} belum didukung.")
 
 @api_router.post("/ai-setup/chat")
 async def ai_setup_chat(req: AISetupMessage, current_user: Dict = Depends(get_current_user)):
@@ -1846,56 +1962,114 @@ async def ai_setup_chat(req: AISetupMessage, current_user: Dict = Depends(get_cu
     if not license_doc or not license_doc.get("valid"):
         raise HTTPException(status_code=400, detail="Lisensi belum aktif. Aktifkan lisensi terlebih dahulu di menu Lisensi.")
 
-    license_key = license_doc.get("licenseKey", "")
-    instance_id = license_doc.get("instanceId", str(uuid.uuid4()))
+    license_key = license_doc.get("licenseKey", "") or ""
+    instance_id = license_doc.get("instanceId", "") or str(uuid.uuid4())
 
-    if not license_key:
-        raise HTTPException(status_code=400, detail="License key tidak ditemukan. Aktifkan lisensi di menu Lisensi.")
+    settings = await get_ai_settings_doc()
+    if not settings.get("api_key") and not (settings.get("provider") == "OLLAMA" and settings.get("base_url")):
+        raise HTTPException(status_code=503, detail="AI Terpusat belum dikonfigurasi oleh superadmin.")
 
-    payload = {
-        "license_key": license_key,
-        "product_code": AI_SETUP_PRODUCT_CODE,
-        "instance_id": instance_id,
-        "app_version": AI_SETUP_APP_VERSION,
-        "message": req.message,
-        "history": req.history,
-    }
+    # Daily token limit check
+    daily_limit = int(settings.get("daily_token_limit") or 0)
+    if daily_limit > 0:
+        from datetime import timezone
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_docs = await db.ai_usage_logs.aggregate([
+            {"$match": {"created_at": {"$gte": today_start}}},
+            {"$group": {"_id": None, "tokens": {"$sum": "$total_tokens"}}}
+        ]).to_list(1)
+        used_today = int((today_docs[0]["tokens"] if today_docs else 0) or 0)
+        if used_today >= daily_limit:
+            raise HTTPException(status_code=429, detail=f"Batas token harian AI Terpusat tercapai ({used_today}/{daily_limit}).")
 
+    # Build message array
+    messages = [{"role": "system", "content": AI_SETUP_SYSTEM_PROMPT}]
+    for h in (req.history or [])[-12:]:
+        role = h.get("role", "user")
+        content = (h.get("content") or "")[:2000]
+        if not content:
+            continue
+        if role not in ("user", "assistant"):
+            role = "user"
+        messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": req.message})
+
+    temperature = float(settings.get("temperature") or 0.2)
+    max_tokens = int(settings.get("max_tokens") or 1200)
+
+    # Try primary, then fallback
+    last_error = None
+    used_source = "primary"
+    result = None
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                AI_SETUP_URL,
-                json=payload,
-                headers={"Content-Type": "application/json"}
-            )
-
-        try:
-            data = response.json()
-        except Exception:
-            data = None
-
-        if response.status_code != 200:
-            logger.warning(f"AI Setup API status {response.status_code}: {response.text[:500]}")
-            if data and isinstance(data, dict):
-                error_msg = data.get("message") or data.get("error") or data.get("reply") or f"API error {response.status_code}"
-                return {"success": False, "reply": error_msg, "need_more_info": False, "drafts": []}
-            raise HTTPException(status_code=502, detail=f"AI Setup API merespon dengan status {response.status_code}. Coba lagi nanti.")
-
-        if not data:
-            raise HTTPException(status_code=502, detail="AI Setup API mengembalikan response kosong.")
-
-        await add_log("AI_SETUP_CALL", f"AI Setup chat: '{req.message[:50]}...' -> success={data.get('success', False)}")
-        return data
-
-    except httpx.TimeoutException:
-        logger.error("AI Setup API timeout")
-        raise HTTPException(status_code=504, detail="AI Setup API timeout. Coba lagi nanti.")
-    except httpx.RequestError as e:
-        logger.error(f"AI Setup API connection error: {str(e)}")
-        raise HTTPException(status_code=502, detail=f"Gagal terhubung ke AI Setup API: {str(e)}")
+        result = await _call_ai_provider(
+            settings.get("provider"), settings.get("model"),
+            settings.get("api_key"), settings.get("base_url"),
+            messages, temperature, max_tokens,
+        )
     except Exception as e:
-        logger.error(f"AI Setup error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        last_error = str(e)
+        logger.warning(f"AI primary failed: {last_error}")
+        # Log failed primary attempt
+        try:
+            await db.ai_usage_logs.insert_one({
+                "license_key": license_key,
+                "product_code": AI_SETUP_PRODUCT_CODE,
+                "instance_id": instance_id,
+                "user_id": current_user["userId"],
+                "ai_source": "primary",
+                "provider": (settings.get("provider") or "").upper(),
+                "model": settings.get("model") or "",
+                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                "success": False, "error_message": last_error[:500],
+                "created_at": datetime.utcnow(),
+            })
+        except Exception:
+            pass
+
+    if result is None and settings.get("fallback_enabled"):
+        if settings.get("fallback_api_key") or (settings.get("fallback_provider") == "OLLAMA" and settings.get("fallback_base_url")):
+            try:
+                result = await _call_ai_provider(
+                    settings.get("fallback_provider"), settings.get("fallback_model"),
+                    settings.get("fallback_api_key"), settings.get("fallback_base_url"),
+                    messages, temperature, max_tokens,
+                )
+                used_source = "fallback"
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"AI fallback failed: {last_error}")
+
+    if result is None:
+        raise HTTPException(status_code=502, detail=f"AI Terpusat gagal: {last_error or 'tidak ada response'}")
+
+    # Log success
+    try:
+        await db.ai_usage_logs.insert_one({
+            "license_key": license_key,
+            "product_code": AI_SETUP_PRODUCT_CODE,
+            "instance_id": instance_id,
+            "user_id": current_user["userId"],
+            "ai_source": used_source,
+            "provider": (settings.get("provider") if used_source == "primary" else settings.get("fallback_provider") or "").upper(),
+            "model": settings.get("model") if used_source == "primary" else settings.get("fallback_model"),
+            "prompt_tokens": result["prompt_tokens"],
+            "completion_tokens": result["completion_tokens"],
+            "total_tokens": result["total_tokens"],
+            "success": True,
+            "created_at": datetime.utcnow(),
+        })
+    except Exception as e:
+        logger.warning(f"Failed to log AI usage: {e}")
+
+    await add_log("AI_SETUP_CALL", f"AI Setup ({used_source}): tokens={result['total_tokens']}")
+
+    return {
+        "success": True,
+        "reply": result["reply"],
+        "need_more_info": False,
+        "drafts": [],
+    }
 
 # ============================================================
 # DOCUMENTATION

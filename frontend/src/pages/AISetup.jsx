@@ -207,7 +207,7 @@ const AISetup = () => {
           <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
           <span>
             Alur aman: ngobrol dengan AI &rarr; AI membuat draft &rarr; cek preview &rarr; klik Simpan Semua Draft.
-            AI Setup menggunakan API <code className="bg-blue-100 px-1.5 py-0.5 rounded text-blue-800 text-xs font-mono">lisensi.satroai.pro/ai-setup</code>.
+            AI Setup menggunakan <strong>AI Terpusat AdminPintar</strong> — Anda tidak perlu mengisi API key sendiri.
             Pastikan lisensi sudah aktif.
           </span>
         </p>
