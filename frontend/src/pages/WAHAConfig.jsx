@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useApp } from '../App';
 import {
   MessageSquare, Save, RefreshCw, CheckCircle, AlertCircle,
   Phone, Wifi, WifiOff, Eye, EyeOff
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
+import apiClient from '../api/apiClient';
 
 const TEMPLATE_VARS = [
   { var: '{customer_name}', desc: 'Nama customer' },
@@ -19,7 +17,6 @@ const TEMPLATE_VARS = [
 ];
 
 export default function WAHAConfig() {
-  const { token } = useApp();
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -29,8 +26,6 @@ export default function WAHAConfig() {
   const [toast, setToast] = useState(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -39,15 +34,14 @@ export default function WAHAConfig() {
   const fetchConfig = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/waha-config`, { headers });
-      if (!res.ok) throw new Error('Gagal memuat konfigurasi WAHA');
-      setConfig(await res.json());
+      const { data } = await apiClient.get('/superadmin/waha-config');
+      setConfig(data);
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(e.response?.data?.detail || 'Gagal memuat konfigurasi WAHA', 'error');
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
@@ -56,15 +50,10 @@ export default function WAHAConfig() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/waha-config`, {
-        method: 'PUT', headers,
-        body: JSON.stringify(config),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal menyimpan');
+      await apiClient.put('/superadmin/waha-config', config);
       showToast('Konfigurasi WAHA berhasil disimpan.');
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(e.response?.data?.detail || 'Gagal menyimpan', 'error');
     } finally {
       setSaving(false);
     }
@@ -74,23 +63,15 @@ export default function WAHAConfig() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/waha-test`, {
-        method: 'POST', headers,
-        body: JSON.stringify({
-          waha_url: config.waha_url,
-          waha_api_key: config.waha_api_key,
-          waha_session: config.waha_session,
-          test_phone: testPhone,
-        }),
+      const { data } = await apiClient.post('/superadmin/waha-test', {
+        waha_url: config.waha_url,
+        waha_api_key: config.waha_api_key,
+        waha_session: config.waha_session,
+        test_phone: testPhone,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setTestResult({ success: false, message: data.detail || 'Koneksi gagal' });
-      } else {
-        setTestResult(data);
-      }
+      setTestResult(data);
     } catch (e) {
-      setTestResult({ success: false, message: e.message });
+      setTestResult({ success: false, message: e.response?.data?.detail || 'Koneksi gagal' });
     } finally {
       setTesting(false);
     }

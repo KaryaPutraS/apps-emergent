@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useApp } from '../App';
 import { Bot, Save, RefreshCw, TrendingUp, Zap, AlertCircle, CheckCircle, ChevronDown, BarChart2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
+import apiClient from '../api/apiClient';
 
 const PROVIDERS = ['GEMINI', 'OPENAI', 'DEEPSEEK', 'GROQ', 'OPENROUTER', 'OLLAMA'];
 
@@ -98,7 +96,6 @@ function ProviderConfig({ prefix, values, onChange, showBaseUrl }) {
 }
 
 export default function AISetupTerpusat() {
-  const { token } = useApp();
   const [settings, setSettings] = useState(null);
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -114,29 +111,21 @@ export default function AISetupTerpusat() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/superadmin/ai-setup`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Gagal memuat pengaturan AI');
-      const data = await res.json();
+      const { data } = await apiClient.get('/superadmin/ai-setup');
       setSettings(data);
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(e.response?.data?.detail || 'Gagal memuat pengaturan AI', 'error');
     }
-  }, [token]);
+  }, []);
 
   const fetchUsage = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/superadmin/ai-usage?days=${usageDays}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Gagal memuat statistik penggunaan');
-      const data = await res.json();
+      const { data } = await apiClient.get(`/superadmin/ai-usage?days=${usageDays}`);
       setUsage(data);
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(e.response?.data?.detail || 'Gagal memuat statistik', 'error');
     }
-  }, [token, usageDays]);
+  }, [usageDays]);
 
   useEffect(() => {
     setLoading(true);
@@ -150,16 +139,10 @@ export default function AISetupTerpusat() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/ai-setup`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal menyimpan');
+      await apiClient.put('/superadmin/ai-setup', settings);
       showToast('Pengaturan AI terpusat berhasil disimpan.');
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(e.response?.data?.detail || 'Gagal menyimpan', 'error');
     } finally {
       setSaving(false);
     }

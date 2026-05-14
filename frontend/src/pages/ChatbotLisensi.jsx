@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useApp } from '../App';
 import {
   Key, Plus, Search, RefreshCw, Send, Trash2, Edit2, CheckCircle,
   AlertCircle, X, ChevronLeft, ChevronRight, MessageSquare
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
-
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8001/api';
+import apiClient from '../api/apiClient';
 
 const STATUS_CONFIG = {
   active: { label: 'Aktif', color: 'bg-green-100 text-green-700' },
@@ -126,7 +124,6 @@ function LicenseForm({ initial, onSubmit, onClose, loading }) {
 }
 
 export default function ChatbotLisensi() {
-  const { token } = useApp();
   const [licenses, setLicenses] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -147,33 +144,30 @@ export default function ChatbotLisensi() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const errMsg = (e, fallback) => e.response?.data?.detail || fallback;
 
   const fetchLicenses = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: LIMIT });
-      if (search) params.set('search', search);
-      if (statusFilter) params.set('status', statusFilter);
-      const res = await fetch(`${API_BASE}/superadmin/licenses?${params}`, { headers });
-      if (!res.ok) throw new Error('Gagal memuat lisensi');
-      const data = await res.json();
+      const params = { page, limit: LIMIT };
+      if (search) params.search = search;
+      if (statusFilter) params.status = statusFilter;
+      const { data } = await apiClient.get('/superadmin/licenses', { params });
       setLicenses(data.items || []);
       setTotal(data.total || 0);
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(errMsg(e, 'Gagal memuat lisensi'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [token, page, search, statusFilter]);
+  }, [page, search, statusFilter]);
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/superadmin/license-stats`, { headers });
-      if (!res.ok) return;
-      setStats(await res.json());
+      const { data } = await apiClient.get('/superadmin/license-stats');
+      setStats(data);
     } catch (_) {}
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     fetchLicenses();
@@ -183,18 +177,13 @@ export default function ChatbotLisensi() {
   const handleCreate = async (form) => {
     setFormLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/licenses`, {
-        method: 'POST', headers,
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal membuat lisensi');
+      const { data } = await apiClient.post('/superadmin/licenses', form);
       showToast(`Lisensi berhasil dibuat: ${data.license_key}`);
       setCreateModal(false);
       fetchLicenses();
       fetchStats();
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(errMsg(e, 'Gagal membuat lisensi'), 'error');
     } finally {
       setFormLoading(false);
     }
@@ -203,17 +192,12 @@ export default function ChatbotLisensi() {
   const handleEdit = async (form) => {
     setFormLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/licenses/${editModal.license_key}`, {
-        method: 'PUT', headers,
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal menyimpan');
+      await apiClient.put(`/superadmin/licenses/${editModal.license_key}`, form);
       showToast('Lisensi berhasil diperbarui.');
       setEditModal(null);
       fetchLicenses();
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(errMsg(e, 'Gagal menyimpan'), 'error');
     } finally {
       setFormLoading(false);
     }
@@ -221,29 +205,23 @@ export default function ChatbotLisensi() {
 
   const handleDelete = async (key) => {
     try {
-      const res = await fetch(`${API_BASE}/superadmin/licenses/${key}`, { method: 'DELETE', headers });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal menghapus');
+      await apiClient.delete(`/superadmin/licenses/${key}`);
       showToast('Lisensi berhasil dihapus.');
       setDeleteConfirm(null);
       fetchLicenses();
       fetchStats();
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(errMsg(e, 'Gagal menghapus'), 'error');
     }
   };
 
   const handleSendWaha = async (key) => {
     setSendingWaha(key);
     try {
-      const res = await fetch(`${API_BASE}/superadmin/licenses/${key}/send-waha`, {
-        method: 'POST', headers,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal kirim WAHA');
+      const { data } = await apiClient.post(`/superadmin/licenses/${key}/send-waha`);
       showToast(data.message || 'Lisensi berhasil dikirim via WhatsApp');
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(errMsg(e, 'Gagal kirim WAHA'), 'error');
     } finally {
       setSendingWaha(null);
     }
@@ -251,17 +229,12 @@ export default function ChatbotLisensi() {
 
   const handleStatusQuick = async (key, status) => {
     try {
-      const res = await fetch(`${API_BASE}/superadmin/licenses/${key}`, {
-        method: 'PUT', headers,
-        body: JSON.stringify({ status }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Gagal update status');
+      await apiClient.put(`/superadmin/licenses/${key}`, { status });
       showToast(`Status diubah ke ${status}`);
       fetchLicenses();
       fetchStats();
     } catch (e) {
-      showToast(e.message, 'error');
+      showToast(errMsg(e, 'Gagal update status'), 'error');
     }
   };
 
