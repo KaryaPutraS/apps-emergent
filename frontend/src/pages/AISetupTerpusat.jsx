@@ -47,7 +47,11 @@ function ProviderConfig({ prefix, values, onChange, showBaseUrl }) {
           <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
           <select
             value={provider}
-            onChange={e => onChange(`${prefix}provider`, e.target.value)}
+            onChange={e => {
+              const p = e.target.value;
+              onChange(`${prefix}provider`, p);
+              onChange(`${prefix}model`, PROVIDER_MODELS[p]?.[0] || '');
+            }}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
@@ -348,6 +352,45 @@ export default function AISetupTerpusat() {
                 </div>
               )}
 
+              {/* Per user */}
+              {usage.per_user?.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <h3 className="font-semibold text-gray-900 mb-3">Pemakaian per User</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100">
+                          <th className="text-left py-2 text-gray-500 font-medium">Username</th>
+                          <th className="text-right py-2 text-gray-500 font-medium">Tokens</th>
+                          <th className="text-right py-2 text-gray-500 font-medium">Requests</th>
+                          <th className="text-right py-2 text-gray-500 font-medium">Porsi</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {usage.per_user.map((item, i) => {
+                          const pct = usage.summary?.total_tokens ? Math.round((item.tokens / usage.summary.total_tokens) * 100) : 0;
+                          return (
+                            <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="py-2 font-medium text-gray-800">{item.username || item.user_id || '-'}</td>
+                              <td className="py-2 text-right font-medium">{fmt(item.tokens)}</td>
+                              <td className="py-2 text-right text-gray-500">{item.requests}</td>
+                              <td className="py-2 text-right">
+                                <div className="flex items-center gap-2 justify-end">
+                                  <div className="w-20 bg-gray-100 rounded-full h-1.5">
+                                    <div className="bg-orange-400 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                                  </div>
+                                  <span className="text-xs text-gray-400 w-8">{pct}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {/* Recent logs */}
               {usage.recent?.length > 0 && (
                 <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -357,6 +400,7 @@ export default function AISetupTerpusat() {
                       <thead>
                         <tr className="border-b border-gray-100">
                           <th className="text-left py-2 text-gray-500 font-medium">Waktu</th>
+                          <th className="text-left py-2 text-gray-500 font-medium">User</th>
                           <th className="text-left py-2 text-gray-500 font-medium">Lisensi</th>
                           <th className="text-left py-2 text-gray-500 font-medium">Provider</th>
                           <th className="text-right py-2 text-gray-500 font-medium">Token</th>
@@ -367,6 +411,7 @@ export default function AISetupTerpusat() {
                         {usage.recent.map((r, i) => (
                           <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
                             <td className="py-1.5 text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleString('id-ID') : '-'}</td>
+                            <td className="py-1.5 text-gray-700">{r.user_id ? String(r.user_id).slice(-6) : '-'}</td>
                             <td className="py-1.5 font-mono text-gray-700">{r.license_key || '-'}</td>
                             <td className="py-1.5 text-gray-600">{r.provider || '-'} / {r.model || '-'}</td>
                             <td className="py-1.5 text-right font-medium">{r.total_tokens || 0}</td>

@@ -3654,6 +3654,27 @@ async def get_ai_usage_stats(days: int = 30, admin: Dict = Depends(require_super
         if "_id" in d:
             d["date"] = d.pop("_id")
 
+    # Per-user top usage
+    per_user_raw = await db.ai_usage_logs.aggregate([
+        {"$match": {"created_at": {"$gte": since}}},
+        {"$group": {"_id": "$user_id", "tokens": {"$sum": "$total_tokens"}, "requests": {"$sum": 1}}},
+        {"$sort": {"tokens": -1}},
+        {"$limit": 20},
+    ]).to_list(20)
+    per_user = []
+    for d in per_user_raw:
+        uid = d.get("_id") or "-"
+        username = str(uid)
+        if uid and uid != "-":
+            try:
+                from bson import ObjectId as _ObjId
+                user_doc = await db.users.find_one({"_id": _ObjId(str(uid))}, {"username": 1, "name": 1})
+                if user_doc:
+                    username = user_doc.get("username") or user_doc.get("name") or str(uid)
+            except Exception:
+                pass
+        per_user.append({"user_id": str(uid), "username": username, "tokens": d.get("tokens", 0), "requests": d.get("requests", 0)})
+
     # Recent logs
     recent_cursor = db.ai_usage_logs.find({}, {"_id": 0}).sort("created_at", -1).limit(50)
     recent = await recent_cursor.to_list(50)
@@ -3666,6 +3687,7 @@ async def get_ai_usage_stats(days: int = 30, admin: Dict = Depends(require_super
         "today": today,
         "per_license": per_license,
         "by_provider": by_provider,
+        "per_user": per_user,
         "timeline": timeline,
         "recent": recent,
     }
@@ -3767,6 +3789,7 @@ async def create_chatbot_license(req: ChatbotLicenseCreate, admin: Dict = Depend
         "plan_name": req.plan_name or "standard",
         "status": "active",
         "max_activations": req.max_activations or 1,
+        "activations_used": 0,
         "expires_at": expires_dt,
         "notes": req.notes or "",
         "created_at": now,

@@ -332,6 +332,7 @@ export default function ChatbotLisensi() {
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Customer</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Produk</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Plan</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-500">Aktivasi</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Status</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-500">Expired</th>
                   <th className="text-right py-3 px-4 font-medium text-gray-500">Aksi</th>
@@ -354,6 +355,18 @@ export default function ChatbotLisensi() {
                     <td className="py-3 px-4 text-gray-600 text-xs">{lic.product_code}</td>
                     <td className="py-3 px-4">
                       <span className="text-xs font-semibold text-gray-600 uppercase">{lic.plan_name}</span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="text-sm font-medium text-gray-800">
+                        {lic.activations_used ?? 0}
+                        <span className="text-gray-400 font-normal"> / {lic.max_activations ?? 1}</span>
+                      </div>
+                      <div className="w-16 bg-gray-100 rounded-full h-1 mt-1">
+                        <div
+                          className={`h-1 rounded-full ${(lic.activations_used ?? 0) >= (lic.max_activations ?? 1) ? 'bg-red-400' : 'bg-green-400'}`}
+                          style={{ width: `${Math.min(100, ((lic.activations_used ?? 0) / (lic.max_activations ?? 1)) * 100)}%` }}
+                        />
+                      </div>
                     </td>
                     <td className="py-3 px-4">
                       <StatusBadge status={lic.status} />
