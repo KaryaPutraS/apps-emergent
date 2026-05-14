@@ -313,6 +313,13 @@ const HeroTab = ({ data, onChange }) => {
         </div>
       </Card>
 
+      <Card title="Hero — Eyebrow (teks kecil di atas headline)">
+        <div>
+          <Label hint="teks pendek di atas judul, mis: ✦ WhatsApp Business Automation">Teks Eyebrow</Label>
+          <Input value={h.eyebrow} onChange={v => set('eyebrow', v)} placeholder="✦ WhatsApp Business Automation" />
+        </div>
+      </Card>
+
       <Card title="Hero — Headline Utama">
         <div className="grid grid-cols-1 gap-3">
           <div>

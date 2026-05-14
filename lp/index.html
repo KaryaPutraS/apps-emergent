@@ -838,7 +838,7 @@
     <div class="hero-inner">
       <!-- Left: Copy -->
       <div class="hero-copy">
-        <div class="hero-eyebrow">✦ WhatsApp Business Automation</div>
+        <div class="hero-eyebrow" id="lp-hero-eyebrow">✦ WhatsApp Business Automation</div>
         <h1 class="hero-headline">
           <span class="line" id="lp-hero-line-1">Jawab Pelanggan</span>
           <span class="line accent" id="lp-hero-line-2">Otomatis 24 Jam</span>
@@ -1333,6 +1333,7 @@
         // Hero
         if (d.hero) {
           var h = d.hero;
+          setText('lp-hero-eyebrow', h.eyebrow);
           if (h.headline) {
             setHtml('lp-hero-line-1', h.headline[0] || '');
             setHtml('lp-hero-line-2', h.headline[1] || '');
