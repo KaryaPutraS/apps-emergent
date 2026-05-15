@@ -4213,7 +4213,7 @@ async def list_waha_pool(admin: Dict = Depends(require_superadmin)):
     result = []
     for d in docs:
         pool_id = str(d["_id"])
-        count = await db.users.count_documents({"managed_pool_id": pool_id, "waha_mode": "managed"})
+        count = await db.config.count_documents({"key": "managed_pool_id", "value": pool_id})
         created = d.get("created_at")
         result.append({
             "id": pool_id,
@@ -4252,7 +4252,7 @@ async def delete_waha_pool_entry(pool_id: str, admin: Dict = Depends(require_sup
         oid = BsonObjectId(pool_id)
     except Exception:
         raise HTTPException(status_code=400, detail="ID tidak valid.")
-    count = await db.users.count_documents({"managed_pool_id": pool_id, "waha_mode": "managed"})
+    count = await db.config.count_documents({"key": "managed_pool_id", "value": pool_id})
     if count > 0:
         raise HTTPException(status_code=400, detail=f"Tidak bisa dihapus: {count} user masih menggunakan WAHA ini.")
     await db.waha_pool.delete_one({"_id": oid})
@@ -4268,12 +4268,20 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
 
     uid = current_user["userId"]
 
+    async def _set_cfg(key: str, value):
+        await db.config.update_one(
+            {"key": key, "userId": uid},
+            {"$set": {"key": key, "userId": uid, "value": value, "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+
     if mode == "managed":
-        # Idempotent: jika user sudah managed, kembalikan data lama tanpa reassign
-        existing = await db.users.find_one({"userId": uid})
-        if existing and existing.get("waha_mode") == "managed" and existing.get("managed_session_name"):
+        # Idempotent: cek apakah user sudah managed dengan session valid
+        existing_user = await db.users.find_one({"id": uid})
+        existing_cfg = await _get_user_config(uid)
+        if existing_cfg.get("waha_mode") == "managed" and existing_cfg.get("managed_session_name"):
             pool_doc = None
-            existing_pool_id = existing.get("managed_pool_id")
+            existing_pool_id = existing_cfg.get("managed_pool_id")
             if existing_pool_id:
                 from bson import ObjectId as BsonObjectId
                 try:
@@ -4284,7 +4292,7 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
                 return {
                     "success": True,
                     "mode": "managed",
-                    "session_name": existing["managed_session_name"],
+                    "session_name": existing_cfg["managed_session_name"],
                     "pool_label": pool_doc.get("label", ""),
                     "reused": True,
                 }
@@ -4296,7 +4304,10 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
         assigned = None
         for pd in pool_docs:
             pool_id = str(pd["_id"])
-            count = await db.users.count_documents({"managed_pool_id": pool_id, "waha_mode": "managed"})
+            # Hitung dari config (sumber kebenaran), bukan users collection
+            count = await db.config.count_documents({
+                "key": "managed_pool_id", "value": pool_id,
+            })
             if count < pd.get("max_sessions", 10):
                 assigned = pd
                 break
@@ -4306,39 +4317,38 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
 
         pool_id = str(assigned["_id"])
 
-        # Generate session name dari username (sanitized), pastikan unik global
-        username = (existing.get("username") if existing else "") or current_user.get("username") or uid
-        base = re.sub(r"[^a-z0-9]", "", username.lower())[:20] or f"u{uid[-6:]}"
+        # Generate session name dari username
+        username = (existing_user.get("username") if existing_user else None) or current_user.get("username") or uid
+        base = re.sub(r"[^a-z0-9]", "", str(username).lower())[:20] or f"u{str(uid)[-6:]}"
         candidate = f"ap_{base}"
         suffix = 1
-        # Cek collision di users (managed_session_name) DAN configs (wahaSession)
-        while await db.users.find_one({"managed_session_name": candidate, "userId": {"$ne": uid}}) \
-                or await db.configs.find_one({"wahaSession": candidate, "userId": {"$ne": uid}}):
+        while await db.config.find_one({
+            "key": "managed_session_name", "value": candidate, "userId": {"$ne": uid},
+        }) or await db.config.find_one({
+            "key": "wahaSession", "value": candidate, "userId": {"$ne": uid},
+        }):
             suffix += 1
             candidate = f"ap_{base}_{suffix}"
             if suffix > 999:
-                # Fallback ekstrim: tambahkan random
                 candidate = f"ap_{base}_{secrets.token_hex(3)}"
                 break
         session_name = candidate
 
+        # Simpan ke config (per-key, sesuai pattern)
+        await _set_cfg("wahaUrl", assigned["url"])
+        await _set_cfg("wahaApiKey", assigned.get("api_key", ""))
+        await _set_cfg("wahaSession", session_name)
+        await _set_cfg("backendUrl", "https://apps.adminpintar.id")
+        await _set_cfg("waha_mode", "managed")
+        await _set_cfg("managed_pool_id", pool_id)
+        await _set_cfg("managed_session_name", session_name)
+
+        # Update juga di users collection (untuk reporting/cleanup)
         await db.users.update_one(
-            {"userId": uid},
+            {"id": uid},
             {"$set": {"waha_mode": "managed", "managed_pool_id": pool_id, "managed_session_name": session_name}},
         )
-        await db.configs.update_one(
-            {"userId": uid},
-            {"$set": {
-                "wahaUrl": assigned["url"],
-                "wahaApiKey": assigned.get("api_key", ""),
-                "wahaSession": session_name,
-                "backendUrl": "https://apps.adminpintar.id",
-                "waha_mode": "managed",
-                "managed_pool_id": pool_id,
-                "managed_session_name": session_name,
-            }},
-            upsert=True,
-        )
+
         return {
             "success": True,
             "mode": "managed",
@@ -4346,14 +4356,12 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
             "pool_label": assigned.get("label", ""),
         }
     else:
+        await _set_cfg("waha_mode", "self_hosted")
+        await db.config.delete_many({"key": "managed_pool_id", "userId": uid})
+        await db.config.delete_many({"key": "managed_session_name", "userId": uid})
         await db.users.update_one(
-            {"userId": uid},
+            {"id": uid},
             {"$set": {"waha_mode": "self_hosted"}, "$unset": {"managed_pool_id": "", "managed_session_name": ""}},
-        )
-        await db.configs.update_one(
-            {"userId": uid},
-            {"$set": {"waha_mode": "self_hosted"}},
-            upsert=True,
         )
         return {"success": True, "mode": "self_hosted"}
 
