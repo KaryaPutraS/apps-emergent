@@ -1776,36 +1776,38 @@
 
   <!-- Footer -->
   <footer>
-    <div class="footer-inner">
+    <div class="footer-inner" id="lp-footer-inner">
       <div class="footer-brand">
-        <a href="#" class="nav-logo lp-brand-logo"><img class="lp-logo-img" alt="" style="display:none;height:32px;width:auto;vertical-align:middle" /><span class="lp-brand-text"><span id="" class="lp-brand-name">AdminPintar</span><span class="nav-logo-dot lp-brand-suffix">.id</span></span></a>
-        <p>Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.</p>
+        <a href="#" class="nav-logo lp-brand-logo"><img class="lp-logo-img" alt="" style="display:none;height:32px;width:auto;vertical-align:middle" /><span class="lp-brand-text"><span class="lp-brand-name">AdminPintar</span><span class="nav-logo-dot lp-brand-suffix">.id</span></span></a>
+        <p id="lp-footer-desc">Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.</p>
       </div>
-      <div class="footer-col">
-        <h4>Produk</h4>
-        <a href="#fitur">Fitur</a>
-        <a href="#harga">Harga</a>
-        <a href="#">Integrasi</a>
-        <a href="#">Changelog</a>
-      </div>
-      <div class="footer-col">
-        <h4>Perusahaan</h4>
-        <a href="#">Tentang Kami</a>
-        <a href="#">Blog</a>
-        <a href="#">Karir</a>
-        <a href="#">Kontak</a>
-      </div>
-      <div class="footer-col">
-        <h4>Dukungan</h4>
-        <a href="#">Dokumentasi</a>
-        <a href="#faq">FAQ</a>
-        <a href="#" class="lp-wa-link">WhatsApp Support</a>
-        <a href="#">Status Sistem</a>
+      <div id="lp-footer-columns" style="display:contents">
+        <div class="footer-col">
+          <h4>Produk</h4>
+          <a href="#fitur">Fitur</a>
+          <a href="#harga">Harga</a>
+          <a href="#">Integrasi</a>
+          <a href="#">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <h4>Perusahaan</h4>
+          <a href="#">Tentang Kami</a>
+          <a href="#">Blog</a>
+          <a href="#">Karir</a>
+          <a href="#">Kontak</a>
+        </div>
+        <div class="footer-col">
+          <h4>Dukungan</h4>
+          <a href="#">Dokumentasi</a>
+          <a href="#faq">FAQ</a>
+          <a href="#" class="lp-wa-link">WhatsApp Support</a>
+          <a href="#">Status Sistem</a>
+        </div>
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© 2025 AdminPintar.id — All rights reserved.</span>
-      <span>
+      <span id="lp-footer-copyright">© 2025 AdminPintar.id — All rights reserved.</span>
+      <span id="lp-footer-legal">
         <a href="#" style="color:#64748b;text-decoration:none;margin-right:16px">Kebijakan Privasi</a>
         <a href="#" style="color:#64748b;text-decoration:none">Syarat & Ketentuan</a>
       </span>
@@ -2176,6 +2178,13 @@
       var s = document.querySelector('.sticky-cta');
       if (s) s.href = v;
     }
+    // Escape utility — defense-in-depth meskipun backend sudah sanitasi
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function escText(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
 
     // ── Global branding override (file yang di-upload via Dashboard Branding) ──
     // Punya prioritas LEBIH TINGGI dari LP Editor branding.favicon_url/logo_url.
@@ -2302,6 +2311,39 @@
             // Tombol pembelian (hero "Aktifkan ...") ikuti link aktivasi langsung
             setHref('lp-buy-link', l.activation);
             setStickyHref(l.activation);
+          }
+        }
+
+        // Footer (description, columns, copyright, legal links)
+        if (d.footer) {
+          var ftr = d.footer;
+          setHtml('lp-footer-desc', ftr.description);
+          if (Array.isArray(ftr.columns)) {
+            var colsEl = el('lp-footer-columns');
+            if (colsEl) {
+              colsEl.innerHTML = ftr.columns.map(function(col) {
+                var t = escText((col && col.title) || '');
+                var links = (col && Array.isArray(col.links)) ? col.links : [];
+                var linksHtml = links.map(function(lk) {
+                  var label = escText((lk && lk.label) || '');
+                  var url = escAttr((lk && lk.url) || '#');
+                  return '<a href="' + url + '">' + label + '</a>';
+                }).join('');
+                return '<div class="footer-col"><h4>' + t + '</h4>' + linksHtml + '</div>';
+              }).join('');
+            }
+          }
+          setHtml('lp-footer-copyright', ftr.copyright);
+          if (Array.isArray(ftr.legal_links)) {
+            var legalEl = el('lp-footer-legal');
+            if (legalEl) {
+              legalEl.innerHTML = ftr.legal_links.map(function(lk, i) {
+                var label = escText((lk && lk.label) || '');
+                var url = escAttr((lk && lk.url) || '#');
+                var style = 'color:#64748b;text-decoration:none' + (i === 0 ? ';margin-right:16px' : '');
+                return '<a href="' + url + '" style="' + style + '">' + label + '</a>';
+              }).join('');
+            }
           }
         }
       })
