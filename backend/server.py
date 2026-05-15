@@ -947,6 +947,13 @@ async def create_user(req: UserCreate, admin: Dict = Depends(require_superadmin)
         await add_log("USER_CREATED", f"User '{username}' ({req.role}) dibuat oleh '{admin['username']}'")
         await log_user_activity(admin["userId"], admin["username"], "USER_CREATED", f"Membuat user '{username}' ({req.role})")
 
+        # Auto-assign managed WAHA session for regular users (best-effort)
+        if req.role == "user":
+            try:
+                await _assign_managed_waha(user_doc["id"], username)
+            except Exception:
+                pass  # Pool empty or not configured — skip silently
+
         user_doc.pop("_id", None)
         user_doc.pop("passwordHash", None)
         return {"success": True, "user": user_doc}
@@ -4011,6 +4018,31 @@ async def create_chatbot_license(req: ChatbotLicenseCreate, admin: Dict = Depend
         "user_id": req.user_id or None,
     }
     await db.chatbot_licenses.insert_one(doc)
+
+    # Auto-activate for linked user so it appears immediately in their dashboard
+    if req.user_id:
+        try:
+            expires_str = expires_dt.strftime("%Y-%m-%d") if expires_dt else ""
+            linked_user = await db.users.find_one({"id": req.user_id})
+            customer_name = doc.get("customer_name") or (linked_user.get("username", "") if linked_user else "")
+            license_data = {
+                "userId": req.user_id,
+                "valid": True,
+                "status": doc.get("status", "active"),
+                "licenseKey": key,
+                "customerName": customer_name,
+                "planName": doc.get("plan_name", "standard").capitalize(),
+                "expiresAt": expires_str,
+                "maxActivations": doc.get("max_activations", 1),
+                "activationsUsed": 1,
+                "productCode": doc.get("product_code", ""),
+                "instanceId": str(uuid.uuid4()),
+            }
+            await db.license.update_one({"userId": req.user_id}, {"$set": license_data}, upsert=True)
+            await db.chatbot_licenses.update_one({"license_key": key}, {"$inc": {"activations_used": 1}})
+        except Exception as e:
+            logger.warning(f"Auto-activate license for user {req.user_id} failed: {e}")
+
     return {"success": True, "license_key": key, "data": _license_to_json(doc)}
 
 @api_router.get("/superadmin/licenses/{license_key}")
