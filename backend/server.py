@@ -4291,6 +4291,8 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
 
         # Pilih pool entry dengan slot kosong
         pool_docs = await db.waha_pool.find({"active": True}).sort("created_at", 1).to_list(100)
+        if not pool_docs:
+            raise HTTPException(status_code=503, detail="Belum ada server WAHA yang dikonfigurasi. Hubungi administrator untuk menambahkan server WAHA.")
         assigned = None
         for pd in pool_docs:
             pool_id = str(pd["_id"])
@@ -4300,7 +4302,7 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
                 break
 
         if not assigned:
-            raise HTTPException(status_code=503, detail="Kapasitas WAHA penuh. Hubungi administrator.")
+            raise HTTPException(status_code=503, detail="Semua server WAHA sudah penuh. Hubungi administrator untuk menambah server baru.")
 
         pool_id = str(assigned["_id"])
 

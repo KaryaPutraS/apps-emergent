@@ -450,7 +450,8 @@ const Connections = () => {
           <button
             type="button"
             onClick={async () => {
-              if (wahaMode === 'managed') return;
+              // Izinkan klik ulang jika session belum ter-assign
+              if (wahaMode === 'managed' && managedSession) return;
               setSettingMode(true);
               try {
                 const res = await setWahaMode('managed');
@@ -491,7 +492,7 @@ const Connections = () => {
                 </div>
               </div>
             </div>
-            {settingMode && wahaMode !== 'managed' && (
+            {settingMode && (wahaMode !== 'managed' || !managedSession) && (
               <div className="absolute inset-0 bg-white/70 rounded-xl flex items-center justify-center">
                 <Loader2 className="w-5 h-5 animate-spin text-emerald-500" />
               </div>
@@ -542,16 +543,49 @@ const Connections = () => {
         {/* Managed mode info */}
         {wahaMode === 'managed' && (
           <div className="space-y-3">
-            <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-emerald-800">WAHA dikelola AdminPintar</p>
-                <p className="text-xs text-emerald-600 mt-0.5">
-                  Session Anda: <code className="bg-emerald-100 px-1.5 rounded font-mono">{managedSession || '—'}</code>
-                  <span className="ml-2">· Backend URL: <code className="bg-emerald-100 px-1.5 rounded font-mono">apps.adminpintar.id</code></span>
-                </p>
+            {managedSession ? (
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-emerald-800">WAHA dikelola AdminPintar</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">
+                    Session Anda: <code className="bg-emerald-100 px-1.5 rounded font-mono">{managedSession}</code>
+                    <span className="ml-2">· Backend URL: <code className="bg-emerald-100 px-1.5 rounded font-mono">apps.adminpintar.id</code></span>
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200">
+                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-800">Session belum ter-assign</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Server WAHA mungkin belum dikonfigurasi atau kapasitas penuh. Klik kartu di atas atau coba lagi nanti.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setSettingMode(true);
+                      try {
+                        const res = await setWahaMode('managed');
+                        setManagedSession(res.session_name || '');
+                        setBackendUrl('https://apps.adminpintar.id');
+                        setWahaConfigured(true);
+                        toast.success(`Session berhasil dibuat: ${res.session_name}`);
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Gagal. Hubungi administrator.');
+                      } finally {
+                        setSettingMode(false);
+                      }
+                    }}
+                    disabled={settingMode}
+                    className="mt-2 flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2"
+                  >
+                    {settingMode ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Coba hubungkan lagi
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
               <Shield className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-blue-700">
