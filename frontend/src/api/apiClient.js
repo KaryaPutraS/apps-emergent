@@ -168,6 +168,22 @@ export const regenerateWebhookToken = async (userId) => {
   return data;
 };
 
+// Superadmin: license helpers used by Kelola User
+export const createChatbotLicense = async (payload) => {
+  const { data } = await apiClient.post('/superadmin/licenses', payload);
+  return data;
+};
+
+export const getUserLatestLicense = async (userId) => {
+  const { data } = await apiClient.get(`/superadmin/users/${userId}/license`);
+  return data;
+};
+
+export const sendLicenseWaha = async (licenseKey, body = {}) => {
+  const { data } = await apiClient.post(`/superadmin/licenses/${licenseKey}/send-waha`, body);
+  return data;
+};
+
 export const getAllUserActivity = async (userId = null, limit = 100) => {
   const params = { limit };
   if (userId) params.user_id = userId;

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header, Request, WebSocket, WebSocketDisconnect, Body
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -3966,6 +3966,7 @@ class ChatbotLicenseCreate(BaseModel):
     max_activations: Optional[int] = 1
     expires_at: Optional[str] = None  # ISO date string or empty = no expiry
     notes: Optional[str] = ""
+    user_id: Optional[str] = None  # Optional link to user from Kelola User
 
 class ChatbotLicenseUpdate(BaseModel):
     customer_name: Optional[str] = None
@@ -4007,6 +4008,7 @@ async def create_chatbot_license(req: ChatbotLicenseCreate, admin: Dict = Depend
         "created_at": now,
         "updated_at": now,
         "created_by": admin.get("username", ""),
+        "user_id": req.user_id or None,
     }
     await db.chatbot_licenses.insert_one(doc)
     return {"success": True, "license_key": key, "data": _license_to_json(doc)}
@@ -4062,8 +4064,16 @@ async def delete_chatbot_license(license_key: str, admin: Dict = Depends(require
         raise HTTPException(status_code=404, detail="Lisensi tidak ditemukan.")
     return {"success": True, "message": "Lisensi berhasil dihapus."}
 
+class SendLicenseWahaReq(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+
 @api_router.post("/superadmin/licenses/{license_key}/send-waha")
-async def send_license_via_waha(license_key: str, admin: Dict = Depends(require_superadmin)):
+async def send_license_via_waha(
+    license_key: str,
+    req: Optional[SendLicenseWahaReq] = Body(default=None),
+    admin: Dict = Depends(require_superadmin),
+):
     doc = await db.chatbot_licenses.find_one({"license_key": license_key.upper()})
     if not doc:
         raise HTTPException(status_code=404, detail="Lisensi tidak ditemukan.")
@@ -4095,6 +4105,15 @@ async def send_license_via_waha(license_key: str, admin: Dict = Depends(require_
         except Exception:
             expires_str = str(doc["expires_at"])
 
+    # Resolve {username} — prefer body, else lookup linked user
+    username_val = (req.username if req else None) or ""
+    if not username_val and doc.get("user_id"):
+        linked = await db.users.find_one({"id": doc["user_id"]})
+        if linked:
+            username_val = linked.get("username") or ""
+    # {password} — only sent if explicitly provided in request body
+    password_val = (req.password if req else None) or ""
+
     message = template
     replacements = {
         "{customer_name}": doc.get("customer_name") or "-",
@@ -4104,6 +4123,8 @@ async def send_license_via_waha(license_key: str, admin: Dict = Depends(require_
         "{expires_at}": expires_str or "Tidak ada expiry",
         "{customer_phone}": phone,
         "{customer_email}": doc.get("customer_email") or "-",
+        "{username}": username_val or "-",
+        "{password}": password_val or "(hubungi admin)",
     }
     for placeholder, value in replacements.items():
         message = message.replace(placeholder, value)
@@ -4128,6 +4149,17 @@ async def send_license_via_waha(license_key: str, admin: Dict = Depends(require_
 
     return {"success": True, "message": f"Lisensi berhasil dikirim ke {phone_digits}"}
 
+@api_router.get("/superadmin/users/{user_id}/license")
+async def get_user_latest_license(user_id: str, admin: Dict = Depends(require_superadmin)):
+    """Return the most recent license linked to a given user (by user_id field)."""
+    doc = await db.chatbot_licenses.find_one(
+        {"user_id": user_id},
+        sort=[("created_at", -1)],
+    )
+    if not doc:
+        return {"found": False}
+    return {"found": True, "data": _license_to_json(doc)}
+
 @api_router.get("/superadmin/license-stats")
 async def get_license_stats(admin: Dict = Depends(require_superadmin)):
     total = await db.chatbot_licenses.count_documents({})
@@ -4146,12 +4178,14 @@ WAHA_SETTINGS_DEFAULTS = {
     "waha_session": "default",
     "waha_api_key": "",
     "license_message_template": (
-        "Halo kak {customer_name}, berikut lisensi ChatBot Anda:\n\n"
+        "Halo kak {customer_name}, berikut akun & lisensi ChatBot Anda:\n\n"
+        "👤 Username: {username}\n"
+        "🔒 Password: {password}\n\n"
         "🔑 License Key:\n{license_key}\n\n"
-        "📦 Produk:\n{product_code}\n\n"
-        "💎 Plan:\n{plan_name}\n\n"
-        "📅 Berlaku hingga:\n{expires_at}\n\n"
-        "Silakan simpan license key ini dengan baik. Terima kasih 🙏"
+        "📦 Produk: {product_code}\n"
+        "💎 Plan: {plan_name}\n"
+        "📅 Berlaku hingga: {expires_at}\n\n"
+        "Silakan login di dashboard dan simpan informasi ini dengan baik. Terima kasih 🙏"
     ),
 }
 

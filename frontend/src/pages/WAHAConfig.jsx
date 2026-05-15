@@ -10,6 +10,8 @@ import { getWahaPool, createWahaPoolEntry, updateWahaPoolEntry, deleteWahaPoolEn
 
 const TEMPLATE_VARS = [
   { var: '{customer_name}', desc: 'Nama customer' },
+  { var: '{username}', desc: 'Username login (dari Kelola User)' },
+  { var: '{password}', desc: 'Password (hanya terisi saat baru dibuat / di-reset)' },
   { var: '{license_key}', desc: 'License key' },
   { var: '{product_code}', desc: 'Kode produk' },
   { var: '{plan_name}', desc: 'Nama plan' },
@@ -518,6 +520,8 @@ export default function WAHAConfig() {
                     <div className="p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed bg-white">
                       {config.license_message_template
                         .replace('{customer_name}', 'Budi Santoso')
+                        .replace('{username}', 'budi_santoso')
+                        .replace('{password}', 'Rahasia#2025')
                         .replace('{license_key}', 'ADMP-AB12-CD34-EF56')
                         .replace('{product_code}', 'adminpintar_chatbot')
                         .replace('{plan_name}', 'Pro')
