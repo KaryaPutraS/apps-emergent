@@ -4424,7 +4424,6 @@ async def waha_pool_diagnostic(current_user: Dict = Depends(get_current_user)):
         "pool_with_capacity": sum(1 for p in pool_info if p["has_capacity"] and p["active"]),
         "pools": pool_info,
     }
-        return {"success": True, "mode": "self_hosted"}
 
 # ============================================================
 # HEALTH CHECK
