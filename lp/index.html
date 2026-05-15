@@ -1264,7 +1264,7 @@
         </h1>
         <p class="hero-sub" id="lp-hero-sub">Chatbot WhatsApp pintar untuk bisnis Anda. Setup 5 menit, langsung aktif. Tidak perlu coding, tidak perlu IT.</p>
         <div class="hero-actions">
-          <a href="#" class="btn-primary lp-activation-link">
+          <a href="#" class="btn-primary lp-buy-link" target="_blank" rel="noopener">
             <span class="wa-icon"></span><span id="lp-hero-cta-primary">Coba Gratis 14 Hari</span>
           </a>
           <a href="#" class="btn-secondary lp-wa-link">💬 Chat via WhatsApp</a>
@@ -2113,11 +2113,13 @@
       });
     };
 
-    // Intercept all .lp-activation-link clicks to open demo modal
+    // Intercept .lp-activation-link clicks to open demo modal.
+    // CATATAN: .lp-buy-link DI-EXCLUDE — tombol itu langsung ikuti href
+    // (link aktivasi yang dikonfigurasi superadmin di LP Editor).
     document.addEventListener('DOMContentLoaded', function() {
       document.body.addEventListener('click', function(e) {
         var a = e.target.closest('.lp-activation-link');
-        if (a) {
+        if (a && !a.classList.contains('lp-buy-link')) {
           e.preventDefault();
           window.openDemoModal();
         }
@@ -2160,6 +2162,7 @@
   (function() {
     // Change this URL to match your API domain
     var API_URL = 'https://apps.adminpintar.id/api/lp-content';
+    var BRANDING_URL = 'https://apps.adminpintar.id/api/branding';
 
     function el(id) { return document.getElementById(id); }
     function setHtml(id, v) { var e = el(id); if (e && v != null) e.innerHTML = v; }
@@ -2173,6 +2176,32 @@
       var s = document.querySelector('.sticky-cta');
       if (s) s.href = v;
     }
+
+    // ── Global branding override (file yang di-upload via Dashboard Branding) ──
+    // Punya prioritas LEBIH TINGGI dari LP Editor branding.favicon_url/logo_url.
+    // Flag _g* mencegah fetch /api/lp-content menimpa nilai yang sudah disetel.
+    var _gFaviconSet = false, _gLogoSet = false, _gNameSet = false;
+    fetch(BRANDING_URL)
+      .then(function(r) { return r.json(); })
+      .then(function(g) {
+        if (!g) return;
+        if (g.faviconDataUrl) {
+          var f = el('lp-favicon'); if (f) f.href = g.faviconDataUrl;
+          _gFaviconSet = true;
+        }
+        if (g.logoDataUrl) {
+          document.querySelectorAll('.lp-logo-img').forEach(function(img) {
+            img.src = g.logoDataUrl; img.style.display = 'inline-block';
+          });
+          document.querySelectorAll('.lp-brand-text').forEach(function(s) { s.style.display = 'none'; });
+          _gLogoSet = true;
+        }
+        if (g.siteName) {
+          document.querySelectorAll('.lp-brand-name').forEach(function(s) { s.textContent = g.siteName; });
+          _gNameSet = true;
+        }
+      })
+      .catch(function() { /* abaikan — pakai default / LP editor */ });
 
     fetch(API_URL)
       .then(function(r) { return r.json(); })
@@ -2188,16 +2217,19 @@
             document.title = b.page_title;
             var t = el('lp-page-title'); if (t) t.textContent = b.page_title;
           }
-          if (b.favicon_url) {
+          // Skip jika sudah di-set dari /api/branding (file upload via Dashboard)
+          if (b.favicon_url && !_gFaviconSet) {
             var f = el('lp-favicon'); if (f) f.href = b.favicon_url;
           }
-          if (b.logo_url) {
+          if (b.logo_url && !_gLogoSet) {
             document.querySelectorAll('.lp-logo-img').forEach(function(img) {
               img.src = b.logo_url; img.style.display = 'inline-block';
             });
             document.querySelectorAll('.lp-brand-text').forEach(function(s) { s.style.display = 'none'; });
-          } else {
-            document.querySelectorAll('.lp-brand-name').forEach(function(s) { if (b.brand_name) s.textContent = b.brand_name; });
+          } else if (!_gLogoSet) {
+            if (!_gNameSet) {
+              document.querySelectorAll('.lp-brand-name').forEach(function(s) { if (b.brand_name) s.textContent = b.brand_name; });
+            }
             document.querySelectorAll('.lp-brand-suffix').forEach(function(s) { if (b.brand_suffix) s.textContent = b.brand_suffix; });
           }
         }
@@ -2267,6 +2299,8 @@
           if (l.whatsapp) setHref('lp-wa-link', l.whatsapp);
           if (l.activation) {
             setHref('lp-activation-link', l.activation);
+            // Tombol pembelian (hero "Aktifkan ...") ikuti link aktivasi langsung
+            setHref('lp-buy-link', l.activation);
             setStickyHref(l.activation);
           }
         }
@@ -2344,6 +2378,7 @@
     function getClickTarget(el) {
       while (el && el !== document.body) {
         if (el.classList) {
+          if (el.classList.contains('lp-buy-link')) return 'buy';
           if (el.classList.contains('lp-activation-link')) return 'activation';
           if (el.classList.contains('lp-wa-link')) return 'whatsapp';
           if (el.classList.contains('sticky-cta')) return 'sticky';
