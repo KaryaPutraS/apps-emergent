@@ -4132,22 +4132,11 @@ async def send_license_via_waha(
     if not waha_url:
         raise HTTPException(status_code=400, detail="WAHA URL belum diatur.")
 
-    import httpx
     chat_id = f"{phone_digits}@c.us"
-    payload = {"session": waha_session, "chatId": chat_id, "text": message}
-    headers = {"Content-Type": "application/json"}
-    if waha_api_key:
-        headers["X-Api-Key"] = waha_api_key
+    # Reuse the existing send_waha_text helper which has primary + fallback format
+    await send_waha_text(waha_url, waha_session, waha_api_key, chat_id, message)
 
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(f"{waha_url}/api/sendText", json=payload, headers=headers)
-        if resp.status_code not in (200, 201):
-            raise HTTPException(status_code=502, detail=f"WAHA error {resp.status_code}: {resp.text[:200]}")
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Gagal menghubungi WAHA: {exc}")
-
-    return {"success": True, "message": f"Lisensi berhasil dikirim ke {phone_digits}"}
+    return {"success": True, "message": f"Pesan berhasil dikirim ke {phone_digits}"}
 
 @api_router.get("/superadmin/users/{user_id}/license")
 async def get_user_latest_license(user_id: str, admin: Dict = Depends(require_superadmin)):
