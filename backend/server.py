@@ -4195,6 +4195,131 @@ async def test_waha_connection(body: dict, admin: Dict = Depends(require_superad
         raise HTTPException(status_code=502, detail=f"Gagal menghubungi WAHA: {exc}")
 
 # ============================================================
+# WAHA POOL (superadmin)
+# ============================================================
+
+class WAHAPoolEntry(BaseModel):
+    label: str
+    url: str
+    api_key: str = ""
+    max_sessions: int = 10
+    active: bool = True
+    notes: str = ""
+
+@api_router.get("/superadmin/waha-pool")
+async def list_waha_pool(admin: Dict = Depends(require_superadmin)):
+    from bson import ObjectId as BsonObjectId
+    docs = await db.waha_pool.find({}).sort("created_at", 1).to_list(100)
+    result = []
+    for d in docs:
+        pool_id = str(d["_id"])
+        count = await db.users.count_documents({"managed_pool_id": pool_id, "waha_mode": "managed"})
+        created = d.get("created_at")
+        result.append({
+            "id": pool_id,
+            "label": d.get("label", ""),
+            "url": d.get("url", ""),
+            "api_key": d.get("api_key", ""),
+            "max_sessions": d.get("max_sessions", 10),
+            "active": d.get("active", True),
+            "notes": d.get("notes", ""),
+            "current_sessions": count,
+            "created_at": created.isoformat() if hasattr(created, "isoformat") else "",
+        })
+    return result
+
+@api_router.post("/superadmin/waha-pool")
+async def create_waha_pool_entry(body: WAHAPoolEntry, admin: Dict = Depends(require_superadmin)):
+    doc = body.dict()
+    doc["created_at"] = datetime.utcnow()
+    result = await db.waha_pool.insert_one(doc)
+    return {"success": True, "id": str(result.inserted_id)}
+
+@api_router.put("/superadmin/waha-pool/{pool_id}")
+async def update_waha_pool_entry(pool_id: str, body: WAHAPoolEntry, admin: Dict = Depends(require_superadmin)):
+    from bson import ObjectId as BsonObjectId
+    try:
+        oid = BsonObjectId(pool_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID tidak valid.")
+    await db.waha_pool.update_one({"_id": oid}, {"$set": body.dict()})
+    return {"success": True}
+
+@api_router.delete("/superadmin/waha-pool/{pool_id}")
+async def delete_waha_pool_entry(pool_id: str, admin: Dict = Depends(require_superadmin)):
+    from bson import ObjectId as BsonObjectId
+    try:
+        oid = BsonObjectId(pool_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="ID tidak valid.")
+    count = await db.users.count_documents({"managed_pool_id": pool_id, "waha_mode": "managed"})
+    if count > 0:
+        raise HTTPException(status_code=400, detail=f"Tidak bisa dihapus: {count} user masih menggunakan WAHA ini.")
+    await db.waha_pool.delete_one({"_id": oid})
+    return {"success": True}
+
+# ── User: pilih mode WAHA (managed / self_hosted) ────────────────
+
+@api_router.post("/waha/set-mode")
+async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_user)):
+    mode = body.get("mode")
+    if mode not in ("managed", "self_hosted"):
+        raise HTTPException(status_code=400, detail="Mode tidak valid.")
+
+    uid = current_user["userId"]
+
+    if mode == "managed":
+        pool_docs = await db.waha_pool.find({"active": True}).sort("created_at", 1).to_list(100)
+        assigned = None
+        for pd in pool_docs:
+            pool_id = str(pd["_id"])
+            count = await db.users.count_documents({"managed_pool_id": pool_id, "waha_mode": "managed"})
+            if count < pd.get("max_sessions", 10):
+                assigned = pd
+                break
+
+        if not assigned:
+            raise HTTPException(status_code=503, detail="Kapasitas WAHA penuh. Hubungi administrator.")
+
+        pool_id = str(assigned["_id"])
+        session_name = f"ap_{uid[-8:]}"
+
+        await db.users.update_one(
+            {"userId": uid},
+            {"$set": {"waha_mode": "managed", "managed_pool_id": pool_id, "managed_session_name": session_name}},
+        )
+        await db.configs.update_one(
+            {"userId": uid},
+            {"$set": {
+                "wahaUrl": assigned["url"],
+                "wahaApiKey": assigned.get("api_key", ""),
+                "wahaSession": session_name,
+                "backendUrl": "https://apps.adminpintar.id",
+                "waha_mode": "managed",
+                "managed_pool_id": pool_id,
+                "managed_session_name": session_name,
+            }},
+            upsert=True,
+        )
+        return {
+            "success": True,
+            "mode": "managed",
+            "session_name": session_name,
+            "pool_label": assigned.get("label", ""),
+        }
+    else:
+        await db.users.update_one(
+            {"userId": uid},
+            {"$set": {"waha_mode": "self_hosted"}, "$unset": {"managed_pool_id": "", "managed_session_name": ""}},
+        )
+        await db.configs.update_one(
+            {"userId": uid},
+            {"$set": {"waha_mode": "self_hosted"}},
+            upsert=True,
+        )
+        return {"success": True, "mode": "self_hosted"}
+
+# ============================================================
 # HEALTH CHECK
 # ============================================================
 

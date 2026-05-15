@@ -390,6 +390,32 @@ export const setWahaWebhook = async () => {
   return data;
 };
 
+export const setWahaMode = async (mode) => {
+  const { data } = await apiClient.post('/waha/set-mode', { mode });
+  return data;
+};
+
+// ── Superadmin: WAHA Pool ─────────────────────────────────────
+export const getWahaPool = async () => {
+  const { data } = await apiClient.get('/superadmin/waha-pool');
+  return data;
+};
+
+export const createWahaPoolEntry = async (entry) => {
+  const { data } = await apiClient.post('/superadmin/waha-pool', entry);
+  return data;
+};
+
+export const updateWahaPoolEntry = async (id, entry) => {
+  const { data } = await apiClient.put(`/superadmin/waha-pool/${id}`, entry);
+  return data;
+};
+
+export const deleteWahaPoolEntry = async (id) => {
+  const { data } = await apiClient.delete(`/superadmin/waha-pool/${id}`);
+  return data;
+};
+
 // ============================================================
 // RESET
 // ============================================================
