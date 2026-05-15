@@ -3500,12 +3500,32 @@ async def demo_register(req: DemoRegisterRequest):
 
     await add_log("DEMO_REGISTERED", f"Demo user '{username}' dibuat untuk '{name}' ({phone})")
 
+    # Auto-assign managed WAHA (best-effort, jangan gagalkan registrasi kalau pool kosong)
+    waha_session = None
+    waha_pool_label = None
+    waha_assign_error = None
+    try:
+        assigned = await _assign_managed_waha(user_id, username)
+        waha_session = assigned["session_name"]
+        waha_pool_label = assigned["pool_label"]
+        await add_log("DEMO_WAHA_ASSIGNED",
+                      f"Demo '{username}' di-assign ke WAHA '{waha_pool_label}' session '{waha_session}'")
+    except HTTPException as e:
+        waha_assign_error = e.detail
+        await add_log("DEMO_WAHA_FAILED", f"Demo '{username}' gagal assign WAHA: {e.detail}")
+    except Exception as e:
+        waha_assign_error = str(e)
+        await add_log("DEMO_WAHA_FAILED", f"Demo '{username}' error assign WAHA: {e}")
+
     return {
         "success": True,
         "username": username,
         "password": password,
         "license_key": key,
         "expires_at": expires_at.strftime("%Y-%m-%d"),
+        "waha_session": waha_session,
+        "waha_pool_label": waha_pool_label,
+        "waha_assign_error": waha_assign_error,
         "message": f"Akun demo berhasil dibuat! Aktif 14 hari hingga {expires_at.strftime('%d %B %Y')}.",
     }
 
@@ -4260,6 +4280,84 @@ async def delete_waha_pool_entry(pool_id: str, admin: Dict = Depends(require_sup
 
 # ── User: pilih mode WAHA (managed / self_hosted) ────────────────
 
+async def _assign_managed_waha(user_id: str, username: str) -> dict:
+    """Assign user ke WAHA pool entry dengan slot kosong. Return session info atau raise HTTPException.
+    Dipakai oleh /waha/set-mode dan /public/demo-register.
+    """
+    async def _save(key: str, value):
+        await db.config.update_one(
+            {"key": key, "userId": user_id},
+            {"$set": {"key": key, "userId": user_id, "value": value, "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+
+    pool_docs = await db.waha_pool.find({"active": True}).sort("created_at", 1).to_list(100)
+    if not pool_docs:
+        raise HTTPException(status_code=503,
+            detail="Belum ada server WAHA yang dikonfigurasi. Minta superadmin tambahkan server di Konfigurasi WAHA → Pool WAHA.")
+
+    assigned = None
+    for pd in pool_docs:
+        pid = str(pd["_id"])
+        used = await db.config.count_documents({"key": "managed_pool_id", "value": pid})
+        if used < int(pd.get("max_sessions") or 10):
+            assigned = pd
+            break
+
+    if not assigned:
+        raise HTTPException(status_code=503,
+            detail="Semua server WAHA sudah penuh. Minta superadmin tambahkan server baru.")
+
+    assigned_pool_id = str(assigned["_id"])
+
+    base = re.sub(r"[^a-z0-9]", "", str(username or "").lower())[:20]
+    if not base:
+        base = f"u{str(user_id)[-6:]}"
+    candidate = f"ap_{base}"
+    suffix = 1
+    while True:
+        clash1 = await db.config.find_one(
+            {"key": "managed_session_name", "value": candidate, "userId": {"$ne": user_id}}
+        )
+        clash2 = await db.config.find_one(
+            {"key": "wahaSession", "value": candidate, "userId": {"$ne": user_id}}
+        )
+        if not clash1 and not clash2:
+            break
+        suffix += 1
+        candidate = f"ap_{base}_{suffix}"
+        if suffix > 999:
+            candidate = f"ap_{base}_{secrets.token_hex(3)}"
+            break
+    session_name = candidate
+
+    for k, v in [
+        ("wahaUrl",              assigned["url"]),
+        ("wahaApiKey",           assigned.get("api_key") or ""),
+        ("wahaSession",          session_name),
+        ("backendUrl",           "https://apps.adminpintar.id"),
+        ("waha_mode",            "managed"),
+        ("managed_pool_id",      assigned_pool_id),
+        ("managed_session_name", session_name),
+    ]:
+        await _save(k, v)
+
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "waha_mode": "managed",
+            "managed_pool_id": assigned_pool_id,
+            "managed_session_name": session_name,
+        }},
+    )
+
+    return {
+        "session_name": session_name,
+        "pool_label": assigned.get("label") or "",
+        "pool_id": assigned_pool_id,
+    }
+
+
 @api_router.post("/waha/set-mode")
 async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_user)):
     mode = body.get("mode")
@@ -4297,81 +4395,15 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
                     "reused": True,
                 }
 
-            # Cari pool entry dengan kapasitas tersedia
-            pool_docs = await db.waha_pool.find({"active": True}).sort("created_at", 1).to_list(100)
-            if not pool_docs:
-                raise HTTPException(status_code=503,
-                    detail="Belum ada server WAHA yang dikonfigurasi. Minta superadmin tambahkan server di menu Konfigurasi WAHA → Pool WAHA.")
-
-            assigned = None
-            for pd in pool_docs:
-                pool_id_str = str(pd["_id"])
-                used = await db.config.count_documents({"key": "managed_pool_id", "value": pool_id_str})
-                if used < int(pd.get("max_sessions") or 10):
-                    assigned = pd
-                    break
-
-            if not assigned:
-                raise HTTPException(status_code=503,
-                    detail="Semua server WAHA sudah penuh. Minta superadmin tambahkan server baru di Pool WAHA.")
-
-            assigned_pool_id = str(assigned["_id"])
-
-            # Session name dari username, pastikan unik
+            # Assign via helper
             user_doc = await db.users.find_one({"id": uid})
-            raw_name = ""
-            if user_doc:
-                raw_name = user_doc.get("username") or ""
-            if not raw_name:
-                raw_name = current_user.get("username") or uid
-            base = re.sub(r"[^a-z0-9]", "", str(raw_name).lower())[:20]
-            if not base:
-                base = f"u{str(uid)[-6:]}"
-            candidate = f"ap_{base}"
-            suffix = 1
-            while True:
-                clash1 = await db.config.find_one(
-                    {"key": "managed_session_name", "value": candidate, "userId": {"$ne": uid}}
-                )
-                clash2 = await db.config.find_one(
-                    {"key": "wahaSession", "value": candidate, "userId": {"$ne": uid}}
-                )
-                if not clash1 and not clash2:
-                    break
-                suffix += 1
-                candidate = f"ap_{base}_{suffix}"
-                if suffix > 999:
-                    candidate = f"ap_{base}_{secrets.token_hex(3)}"
-                    break
-            session_name = candidate
-
-            # Simpan semua key ke db.config
-            for k, v in [
-                ("wahaUrl",             assigned["url"]),
-                ("wahaApiKey",          assigned.get("api_key") or ""),
-                ("wahaSession",         session_name),
-                ("backendUrl",          "https://apps.adminpintar.id"),
-                ("waha_mode",           "managed"),
-                ("managed_pool_id",     assigned_pool_id),
-                ("managed_session_name", session_name),
-            ]:
-                await _save_cfg(k, v)
-
-            # Update users collection juga (untuk reporting)
-            await db.users.update_one(
-                {"id": uid},
-                {"$set": {
-                    "waha_mode": "managed",
-                    "managed_pool_id": assigned_pool_id,
-                    "managed_session_name": session_name,
-                }},
-            )
-
+            uname = (user_doc.get("username") if user_doc else None) or current_user.get("username") or uid
+            result = await _assign_managed_waha(uid, uname)
             return {
                 "success": True,
                 "mode": "managed",
-                "session_name": session_name,
-                "pool_label": assigned.get("label") or "",
+                "session_name": result["session_name"],
+                "pool_label": result["pool_label"],
             }
 
         else:  # self_hosted
