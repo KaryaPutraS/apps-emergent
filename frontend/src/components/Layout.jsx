@@ -4,7 +4,8 @@ import {
   LayoutDashboard, Key, Plug, Brain, GitBranch, BookOpen, FileText,
   Users, MessageSquare, Radio, Sparkles, RotateCcw, Settings, SlidersHorizontal,
   FlaskConical, ScrollText, LogOut, Menu, X, Bot, ChevronLeft,
-  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity, ChevronDown
+  UserCog, ShieldCheck, UserCircle, BookMarked, Palette, Activity, ChevronDown, Globe, BarChart3,
+  Cpu, Phone
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
@@ -33,11 +34,21 @@ import Documentation from '../pages/Documentation';
 import Branding from '../pages/Branding';
 import ActivityLog from '../pages/ActivityLog';
 import BotSettings from '../pages/BotSettings';
+import LPEditor from '../pages/LPEditor';
+import LPAnalytics from '../pages/LPAnalytics';
+import AISetupTerpusat from '../pages/AISetupTerpusat';
+import ChatbotLisensi from '../pages/ChatbotLisensi';
+import WAHAConfig from '../pages/WAHAConfig';
 
 const superadminNavItems = [
   { id: 'user-management', label: 'Kelola User', icon: UserCog, group: 'main' },
   { id: 'activity-log', label: 'Log Aktivitas', icon: Activity, group: 'main' },
   { id: 'branding', label: 'Branding', icon: Palette, group: 'main' },
+  { id: 'lp-editor', label: 'Editor LP', icon: Globe, group: 'main' },
+  { id: 'lp-analytics', label: 'Analytics LP', icon: BarChart3, group: 'main' },
+  { id: 'ai-setup-terpusat', label: 'AI Terpusat', icon: Cpu, group: 'lisensi' },
+  { id: 'chatbot-lisensi', label: 'ChatBOT Lisensi', icon: Key, group: 'lisensi' },
+  { id: 'waha-config', label: 'Konfigurasi WAHA', icon: Phone, group: 'lisensi' },
   { id: 'docs', label: 'Dokumentasi', icon: BookMarked, group: 'main' },
 ];
 
@@ -67,6 +78,7 @@ const groupLabels = {
   data: 'Data',
   tools: 'Tools',
   system: 'Sistem',
+  lisensi: 'Manajemen Lisensi',
 };
 
 const pageComponents = {
@@ -86,6 +98,11 @@ const pageComponents = {
   'user-management': UserManagement,
   'activity-log': ActivityLog,
   'branding': Branding,
+  'lp-editor': LPEditor,
+  'lp-analytics': LPAnalytics,
+  'ai-setup-terpusat': AISetupTerpusat,
+  'chatbot-lisensi': ChatbotLisensi,
+  'waha-config': WAHAConfig,
   'reset-data': ResetData,
   'settings': SettingsPage,
   'bot-settings': BotSettings,
@@ -105,10 +122,10 @@ const Layout = () => {
   const logoDataUrl = branding?.logoDataUrl || '';
 
   const navItems = isSuperAdmin ? superadminNavItems : userNavItems;
-  const groups = isSuperAdmin ? ['main'] : ['main', 'bot', 'data', 'tools', 'system'];
+  const groups = isSuperAdmin ? ['main', 'lisensi'] : ['main', 'bot', 'data', 'tools', 'system'];
 
   // Superadmin can access user-management, branding, and docs; user never accesses these
-  const superadminAllowed = ['user-management', 'activity-log', 'branding', 'docs'];
+  const superadminAllowed = ['user-management', 'activity-log', 'branding', 'lp-editor', 'lp-analytics', 'ai-setup-terpusat', 'chatbot-lisensi', 'waha-config', 'docs'];
   const userBlocked = ['user-management', 'activity-log', 'branding'];
   const safeTab = isSuperAdmin
     ? (superadminAllowed.includes(activeTab) ? activeTab : 'user-management')

@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../App';
 import {
   getUsers, getUserStats, createUser, updateUser, deleteUser, toggleUser,
-  regenerateWebhookToken
+  regenerateWebhookToken,
+  createChatbotLicense, getUserLatestLicense, sendLicenseWaha,
 } from '../api/apiClient';
 import { toast } from 'sonner';
 import {
   UserCog, UserPlus, Pencil, Trash2,
   ShieldCheck, Users, UserCheck, UserX, Eye, EyeOff, X, Save,
-  RefreshCw, Search, Crown, Briefcase, Link, Copy, RotateCw
+  RefreshCw, Search, Crown, Briefcase, Link, Copy, RotateCw, Send, Key,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -95,8 +96,9 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
         if (form.password) payload.password = form.password;
         await updateUser(user.id, payload);
         toast.success('User berhasil diperbarui');
+        onSaved({ created: false });
       } else {
-        await createUser({
+        const res = await createUser({
           username: form.username.trim().toLowerCase(),
           fullName: form.fullName.trim(),
           email: form.email.trim(),
@@ -105,8 +107,8 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
           isActive: form.isActive,
         });
         toast.success('User baru berhasil dibuat');
+        onSaved({ created: true, user: res?.user, password: form.password });
       }
-      onSaved();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Gagal menyimpan user');
     } finally {
@@ -279,6 +281,292 @@ const UserModal = ({ user, onClose, onSaved, currentUserId }) => {
   );
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// LICENSE POPUP — appears right after user is created
+// ──────────────────────────────────────────────────────────────────────────
+const LicenseAfterUserModal = ({ user, password, onClose, onDone }) => {
+  const [form, setForm] = useState({
+    product_code: 'adminpintar_chatbot',
+    customer_name: user?.fullName || user?.username || '',
+    customer_phone: '',
+    customer_email: user?.email || '',
+    plan_name: 'standard',
+    max_activations: 1,
+    expires_at: '',
+    notes: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [created, setCreated] = useState(null); // { license_key, ... }
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    if (!form.product_code.trim()) { toast.error('Kode produk wajib diisi'); return; }
+    setSaving(true);
+    try {
+      const res = await createChatbotLicense({ ...form, user_id: user.id });
+      toast.success(`Lisensi dibuat: ${res.license_key}`);
+      setCreated(res);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal membuat lisensi');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!form.customer_phone.trim()) { toast.error('Nomor HP customer kosong, tidak bisa kirim'); return; }
+    setSending(true);
+    try {
+      await sendLicenseWaha(created.license_key, {
+        username: user.username,
+        password,
+        template_key: 'account_message_template',
+      });
+      toast.success('Pesan akun & lisensi terkirim via WhatsApp');
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal mengirim WhatsApp');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+              <Key className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-900">{created ? 'Lisensi Berhasil Dibuat' : 'Buat Lisensi untuk User Baru'}</h3>
+              <p className="text-xs text-slate-500">User: @{user.username}</p>
+            </div>
+          </div>
+          <button onClick={onDone} className="p-2 rounded-lg hover:bg-slate-100">
+            <X className="w-4 h-4 text-slate-500" />
+          </button>
+        </div>
+
+        {!created ? (
+          <form onSubmit={handleCreate} className="p-6 space-y-4">
+            <div>
+              <label className="text-sm font-medium text-slate-700 mb-1 block">Kode Produk <span className="text-red-500">*</span></label>
+              <Input value={form.product_code} onChange={e => set('product_code', e.target.value)} className="h-10" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">Nama Customer</label>
+                <Input value={form.customer_name} onChange={e => set('customer_name', e.target.value)} className="h-10" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">No. WhatsApp <span className="text-red-500">*</span></label>
+                <Input value={form.customer_phone} onChange={e => set('customer_phone', e.target.value)} placeholder="08123456789" className="h-10" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">Plan</label>
+                <select value={form.plan_name} onChange={e => set('plan_name', e.target.value)}
+                  className="w-full border border-slate-200 rounded-md h-10 px-3 text-sm">
+                  <option value="standard">Standard</option>
+                  <option value="pro">Pro</option>
+                  <option value="enterprise">Enterprise</option>
+                  <option value="trial">Trial</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">Tanggal Expired</label>
+                <Input type="date" value={form.expires_at ? form.expires_at.slice(0, 10) : ''}
+                  onChange={e => set('expires_at', e.target.value)} className="h-10" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">Maks. Aktivasi</label>
+                <Input type="number" min={1} value={form.max_activations}
+                  onChange={e => set('max_activations', parseInt(e.target.value) || 1)} className="h-10" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-1 block">Email Customer</label>
+                <Input value={form.customer_email} onChange={e => set('customer_email', e.target.value)} className="h-10" />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 mb-1 block">Catatan</label>
+              <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2}
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm resize-none" />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={onDone} className="flex-1">Lewati</Button>
+              <Button type="submit" disabled={saving} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white">
+                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
+                {saving ? 'Menyimpan...' : 'Buat Lisensi'}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="p-6 space-y-4">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <p className="text-xs text-emerald-700 mb-1">License Key</p>
+              <p className="font-mono font-bold text-emerald-900">{created.license_key}</p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1 text-sm">
+              <p><span className="text-slate-500">Username:</span> <span className="font-mono">{user.username}</span></p>
+              <p><span className="text-slate-500">Password:</span> <span className="font-mono">{password || '(tidak diketahui)'}</span></p>
+              <p><span className="text-slate-500">No. WA:</span> <span className="font-mono">{form.customer_phone || '-'}</span></p>
+            </div>
+            <p className="text-xs text-slate-500">
+              Pesan akun (username + password) & lisensi akan dikirim ke nomor WA customer menggunakan WAHA yang dikonfigurasi di menu Konfigurasi WAHA. Template pesan dapat diatur di sana.
+            </p>
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={onDone} className="flex-1">Tutup</Button>
+              <Button onClick={handleSend} disabled={sending || !form.customer_phone}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white">
+                {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+                {sending ? 'Mengirim...' : 'Kirim ke User via WhatsApp'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// SEND-TO-USER MODAL — per-row "Kirim ke User" action
+// ──────────────────────────────────────────────────────────────────────────
+const SendToUserModal = ({ user, onClose }) => {
+  const [loading, setLoading] = useState(true);
+  const [license, setLicense] = useState(null);
+  const [password, setPassword] = useState('');
+  const [resetPassword, setResetPassword] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await getUserLatestLicense(user.id);
+        if (!alive) return;
+        if (data.found) setLicense(data.data);
+        else setLicense(null);
+      } catch (err) {
+        toast.error('Gagal memuat lisensi user');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [user.id]);
+
+  const handleSend = async () => {
+    if (!license) return;
+    if (!license.customer_phone) { toast.error('Lisensi belum ada nomor HP customer'); return; }
+    setSending(true);
+    try {
+      if (resetPassword && password) {
+        await updateUser(user.id, { password });
+      }
+      await sendLicenseWaha(license.license_key, {
+        username: user.username,
+        password: resetPassword && password ? password : '',
+        template_key: 'account_message_template',
+      });
+      toast.success('Pesan terkirim ke user');
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Gagal mengirim pesan');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-scale-in">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+              <Send className="w-4 h-4 text-emerald-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-900">Kirim ke User</h3>
+              <p className="text-xs text-slate-500">@{user.username}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100">
+            <X className="w-4 h-4 text-slate-500" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {loading ? (
+            <div className="flex justify-center py-8"><RefreshCw className="w-5 h-5 animate-spin text-emerald-500" /></div>
+          ) : !license ? (
+            <div className="text-center py-6">
+              <Key className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+              <p className="text-sm font-medium text-slate-700">User belum punya lisensi</p>
+              <p className="text-xs text-slate-500 mt-1">Buat lisensi terlebih dulu di menu ChatBot Lisensi atau saat membuat user baru.</p>
+            </div>
+          ) : (
+            <>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm space-y-1">
+                <p className="text-xs text-emerald-700">License Key</p>
+                <p className="font-mono font-bold text-emerald-900">{license.license_key}</p>
+                <p className="text-xs text-emerald-700 mt-2">
+                  Plan: <strong>{license.plan_name}</strong> · Tujuan WA: <strong className="font-mono">{license.customer_phone || '(belum diisi)'}</strong>
+                </p>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+                Password user tersimpan ter-hash & tidak bisa dibaca. Centang opsi di bawah untuk reset password dan menyertakannya ke pesan.
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={resetPassword} onChange={e => setResetPassword(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-emerald-600" />
+                <span className="text-sm text-slate-700">Reset password user & sertakan dalam pesan</span>
+              </label>
+
+              {resetPassword && (
+                <div>
+                  <label className="text-sm font-medium text-slate-700 mb-1 block">Password Baru</label>
+                  <div className="relative">
+                    <Input type={showPwd ? 'text' : 'password'} value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Min. 12 karakter" className="h-10 pr-10" />
+                    <button type="button" onClick={() => setShowPwd(p => !p)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <Button variant="outline" onClick={onClose} className="flex-1">Batal</Button>
+                <Button onClick={handleSend}
+                  disabled={sending || !license.customer_phone || (resetPassword && password.length < 12)}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
+                  {sending ? 'Mengirim...' : 'Kirim Sekarang'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const UserManagement = () => {
   const { currentUser } = useApp();
   const [users, setUsers] = useState([]);
@@ -290,6 +578,8 @@ const UserManagement = () => {
   const [deletingId, setDeletingId] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
   const [regeneratingId, setRegeneratingId] = useState(null);
+  const [pendingLicense, setPendingLicense] = useState(null); // { user, password }
+  const [sendUser, setSendUser] = useState(null); // user object
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -309,7 +599,13 @@ const UserManagement = () => {
   const openAdd = () => { setModalUser(null); setShowModal(true); };
   const openEdit = (u) => { setModalUser(u); setShowModal(true); };
   const closeModal = () => { setShowModal(false); setModalUser(undefined); };
-  const handleSaved = () => { closeModal(); load(); };
+  const handleSaved = (meta) => {
+    closeModal();
+    load();
+    if (meta?.created && meta.user) {
+      setPendingLicense({ user: meta.user, password: meta.password });
+    }
+  };
 
   const handleToggle = async (u) => {
     setTogglingId(u.id);
@@ -543,6 +839,15 @@ const UserManagement = () => {
                             }
                           </button>
 
+                          {/* Kirim ke User (akun + lisensi via WAHA) */}
+                          <button
+                            onClick={() => setSendUser(u)}
+                            title="Kirim akun & lisensi ke user via WhatsApp"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                          >
+                            <Send className="w-4 h-4" />
+                          </button>
+
                           {/* Edit */}
                           <button
                             onClick={() => openEdit(u)}
@@ -587,6 +892,21 @@ const UserManagement = () => {
           onSaved={handleSaved}
           currentUserId={currentUser?.userId}
         />
+      )}
+
+      {/* Popup buat lisensi setelah user dibuat */}
+      {pendingLicense && (
+        <LicenseAfterUserModal
+          user={pendingLicense.user}
+          password={pendingLicense.password}
+          onClose={() => setPendingLicense(null)}
+          onDone={() => setPendingLicense(null)}
+        />
+      )}
+
+      {/* Modal kirim akun + lisensi ke user via WAHA */}
+      {sendUser && (
+        <SendToUserModal user={sendUser} onClose={() => setSendUser(null)} />
       )}
     </div>
   );

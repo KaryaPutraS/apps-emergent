@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../App';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Lock, Eye, EyeOff, Bot, ShieldCheck, User } from 'lucide-react';
 import { toast } from 'sonner';
 
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// ─── Main LoginPage ────────────────────────────────────────────────────────
 const LoginPage = () => {
   const { login, branding } = useApp();
   const siteName = branding?.siteName || 'adminpintar.id';
@@ -14,6 +17,31 @@ const LoginPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Auto-fill credentials from URL hash (#demo_login=user:pass) — sent by LP demo flow
+  useEffect(() => {
+    const hash = window.location.hash || '';
+    const m = hash.match(/^#demo_login=([^:]+):(.+)$/);
+    if (m) {
+      try {
+        const u = decodeURIComponent(m[1]);
+        const p = decodeURIComponent(m[2]);
+        setUsername(u);
+        setPassword(p);
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        setLoading(true);
+        setTimeout(async () => {
+          const result = await login(u, p);
+          setLoading(false);
+          if (result.success) {
+            toast.success(`Selamat datang! Akun demo berhasil masuk.`);
+          } else {
+            setError(result.message || 'Auto-login gagal. Silakan klik tombol Masuk.');
+          }
+        }, 400);
+      } catch (_) {}
+    }
+  }, [login]);
 
   const handleLogin = async (e) => {
     e.preventDefault();

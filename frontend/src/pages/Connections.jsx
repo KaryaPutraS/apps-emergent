@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../App';
-import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession, getWahaWebhook, setWahaWebhook, debugWaha } from '../api/apiClient';
+import { getConfig, updateConfig, getWahaStatus, getWahaQr, startWahaSession, stopWahaSession, getWahaWebhook, setWahaWebhook, debugWaha, setWahaMode } from '../api/apiClient';
 import {
   Copy, Save, Search, Wifi, Brain, Globe, QrCode,
   Smartphone, RefreshCw, Play, Square, CheckCircle2,
-  AlertCircle, Loader2, Eye, EyeOff, Unplug, Webhook, Zap, Link2, Power
+  AlertCircle, Loader2, Eye, EyeOff, Unplug, Webhook, Zap, Link2, Power,
+  Shield, Server, ChevronRight, Lock,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -293,6 +294,9 @@ const Connections = () => {
   const [ollamaUrl, setOllamaUrl] = useState('');
   const [aiEnabled, setAiEnabled] = useState(true);
   const [wahaConfigured, setWahaConfigured] = useState(false);
+  const [wahaMode, setWahaMode] = useState(''); // '' | 'managed' | 'self_hosted'
+  const [managedSession, setManagedSession] = useState('');
+  const [settingMode, setSettingMode] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState('');
   const [backendUrl, setBackendUrl] = useState('');
   const [webhookStatus, setWebhookStatus] = useState(null); // null | 'loading' | 'set' | 'none'
@@ -327,7 +331,9 @@ const Connections = () => {
       setAiApiKey(data.aiApiKey || '');
       setOllamaUrl(data.ollamaUrl || '');
       setAiEnabled(data.aiEnabled !== false);
-      setBackendUrl(data.backendUrl || 'https://adminpintar.id');
+      setBackendUrl(data.backendUrl || 'https://apps.adminpintar.id');
+      setWahaMode(data.waha_mode || 'self_hosted');
+      setManagedSession(data.managed_session_name || '');
       setWahaConfigured(!!data.wahaUrl);
       setLoading(false);
     }).catch((err) => {
@@ -431,64 +437,211 @@ const Connections = () => {
         <p className="text-slate-500 text-sm mt-0.5">Setup WAHA WhatsApp API & AI Provider</p>
       </div>
 
-      {/* ── WAHA Config ── */}
+      {/* ── WAHA Mode Selector ── */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-4">
+        <h3 className="font-semibold text-slate-900 flex items-center gap-2 mb-1">
           <Wifi className="w-4 h-4 text-emerald-500" /> Konfigurasi WAHA
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">WAHA URL</label>
-            <Input value={wahaUrl} onChange={(e) => setWahaUrl(e.target.value)} placeholder="https://your-waha-server.com" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1.5">Session Name</label>
-            <Input value={wahaSession} onChange={(e) => setWahaSession(e.target.value)} placeholder="contoh: tokosaya, bisnisabcd" className={wahaSession.trim().toLowerCase() === 'default' ? 'border-red-300 focus-visible:ring-red-400' : ''} />
-            {wahaSession.trim().toLowerCase() === 'default' && (
-              <p className="text-xs text-red-500 mt-1">Nama "default" tidak diperbolehkan — gunakan nama unik.</p>
+        <p className="text-sm text-slate-500 mb-5">Pilih sumber server WhatsApp yang akan digunakan</p>
+
+        {/* Mode cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Card: Gunakan WAHA Kami */}
+          <button
+            type="button"
+            onClick={async () => {
+              // Izinkan klik ulang jika session belum ter-assign
+              if (wahaMode === 'managed' && managedSession) return;
+              setSettingMode(true);
+              try {
+                const res = await setWahaMode('managed');
+                setWahaMode('managed');
+                setManagedSession(res.session_name || '');
+                setBackendUrl('https://apps.adminpintar.id');
+                setWahaConfigured(true);
+                toast.success(`WAHA dikelola kami. Session: ${res.session_name}`);
+              } catch (err) {
+                toast.error(err.response?.data?.detail || 'Gagal mengaktifkan managed WAHA.');
+              } finally {
+                setSettingMode(false);
+              }
+            }}
+            className={`relative text-left p-4 rounded-xl border-2 transition-all ${
+              wahaMode === 'managed'
+                ? 'border-emerald-500 bg-emerald-50'
+                : 'border-slate-200 hover:border-emerald-300 hover:bg-slate-50'
+            }`}
+          >
+            {wahaMode === 'managed' && (
+              <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+              </div>
             )}
-            {!wahaSession.trim() && <p className="text-xs text-slate-400 mt-1">Wajib diisi · gunakan nama unik agar tidak bentrok dengan sesi lain</p>}
+            <div className="flex items-start gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${wahaMode === 'managed' ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                <Shield className={`w-4.5 h-4.5 ${wahaMode === 'managed' ? 'text-emerald-600' : 'text-slate-500'}`} />
+              </div>
+              <div>
+                <p className={`font-semibold text-sm ${wahaMode === 'managed' ? 'text-emerald-800' : 'text-slate-800'}`}>
+                  Gunakan WAHA Kami
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">Server dikelola AdminPintar. Tidak perlu setup sendiri.</p>
+                <div className="flex items-center gap-1 mt-2">
+                  <Lock className="w-3 h-3 text-emerald-500" />
+                  <span className="text-xs text-emerald-600 font-medium">Data Anda aman & terenkripsi</span>
+                </div>
+              </div>
+            </div>
+            {settingMode && (wahaMode !== 'managed' || !managedSession) && (
+              <div className="absolute inset-0 bg-white/70 rounded-xl flex items-center justify-center">
+                <Loader2 className="w-5 h-5 animate-spin text-emerald-500" />
+              </div>
+            )}
+          </button>
+
+          {/* Card: WAHA Sendiri */}
+          <button
+            type="button"
+            onClick={async () => {
+              if (wahaMode === 'self_hosted') return;
+              setSettingMode(true);
+              try {
+                await setWahaMode('self_hosted');
+                setWahaMode('self_hosted');
+                setWahaConfigured(false);
+                toast.success('Mode diubah ke WAHA sendiri.');
+              } catch (err) {
+                toast.error(err.response?.data?.detail || 'Gagal mengubah mode.');
+              } finally {
+                setSettingMode(false);
+              }
+            }}
+            className={`relative text-left p-4 rounded-xl border-2 transition-all ${
+              wahaMode === 'self_hosted' || wahaMode === ''
+                ? 'border-slate-400 bg-slate-50'
+                : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            {(wahaMode === 'self_hosted' || wahaMode === '') && (
+              <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-slate-500 flex items-center justify-center">
+                <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+              </div>
+            )}
+            <div className="flex items-start gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${wahaMode === 'self_hosted' || wahaMode === '' ? 'bg-slate-200' : 'bg-slate-100'}`}>
+                <Server className="w-4.5 h-4.5 text-slate-600" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm text-slate-800">Gunakan WAHA Sendiri</p>
+                <p className="text-xs text-slate-500 mt-0.5">Hubungkan ke server WAHA milik Anda sendiri.</p>
+                <p className="text-xs text-slate-400 mt-2">Perlu memasukkan URL & API key secara manual</p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Managed mode info */}
+        {wahaMode === 'managed' && (
+          <div className="space-y-3">
+            {managedSession ? (
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-emerald-800">WAHA dikelola AdminPintar</p>
+                  <p className="text-xs text-emerald-600 mt-0.5">
+                    Session Anda: <code className="bg-emerald-100 px-1.5 rounded font-mono">{managedSession}</code>
+                    <span className="ml-2">· Backend URL: <code className="bg-emerald-100 px-1.5 rounded font-mono">apps.adminpintar.id</code></span>
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200">
+                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-800">Session belum ter-assign</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Server WAHA mungkin belum dikonfigurasi atau kapasitas penuh. Klik kartu di atas atau coba lagi nanti.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      setSettingMode(true);
+                      try {
+                        const res = await setWahaMode('managed');
+                        setManagedSession(res.session_name || '');
+                        setBackendUrl('https://apps.adminpintar.id');
+                        setWahaConfigured(true);
+                        toast.success(`Session berhasil dibuat: ${res.session_name}`);
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Gagal. Hubungi administrator.');
+                      } finally {
+                        setSettingMode(false);
+                      }
+                    }}
+                    disabled={settingMode}
+                    className="mt-2 flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-900 underline underline-offset-2"
+                  >
+                    {settingMode ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                    Coba hubungkan lagi
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
+              <Shield className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-blue-700">
+                <strong>Keamanan data Anda terjamin.</strong> Server WAHA kami menggunakan isolasi session — pesan Anda tidak dapat diakses oleh user lain. Data hanya diproses untuk keperluan chatbot Anda.
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="mt-4">
-          <label className="text-sm font-medium text-slate-700 block mb-1.5">API Key <span className="text-xs font-normal text-slate-400">(opsional)</span></label>
-          <div className="relative">
-            <Input
-              type={showApiKey ? 'text' : 'password'}
-              value={wahaApiKey}
-              onChange={(e) => setWahaApiKey(e.target.value)}
-              placeholder="X-Api-Key dari WAHA"
-              className="pr-10"
-            />
-            <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
+        )}
+
+        {/* Self-hosted form */}
+        {(wahaMode === 'self_hosted' || wahaMode === '') && (
+          <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-1.5">WAHA URL</label>
+                <Input value={wahaUrl} onChange={(e) => setWahaUrl(e.target.value)} placeholder="https://your-waha-server.com" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 block mb-1.5">Session Name</label>
+                <Input value={wahaSession} onChange={(e) => setWahaSession(e.target.value)} placeholder="contoh: tokosaya, bisnisabcd" className={wahaSession.trim().toLowerCase() === 'default' ? 'border-red-300 focus-visible:ring-red-400' : ''} />
+                {wahaSession.trim().toLowerCase() === 'default' && (
+                  <p className="text-xs text-red-500 mt-1">Nama "default" tidak diperbolehkan — gunakan nama unik.</p>
+                )}
+                {!wahaSession.trim() && <p className="text-xs text-slate-400 mt-1">Wajib diisi · gunakan nama unik agar tidak bentrok dengan sesi lain</p>}
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1.5">API Key <span className="text-xs font-normal text-slate-400">(opsional)</span></label>
+              <div className="relative">
+                <Input type={showApiKey ? 'text' : 'password'} value={wahaApiKey} onChange={(e) => setWahaApiKey(e.target.value)} placeholder="X-Api-Key dari WAHA" className="pr-10" />
+                <button type="button" onClick={() => setShowApiKey(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Kosongkan jika WAHA tidak menggunakan autentikasi
+                {wahaApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
+              </p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700 block mb-1.5">
+                Backend URL Publik <span className="ml-1.5 text-xs font-normal text-slate-400">(untuk webhook)</span>
+              </label>
+              <Input value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} placeholder="https://apps.adminpintar.id" />
+              <p className="text-xs text-slate-400 mt-1">URL publik server ini — digunakan WAHA untuk mengirim pesan masuk ke dashboard</p>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleSaveWaha} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+                <Save className="w-4 h-4" /> Simpan
+              </Button>
+              <Button variant="outline" onClick={handleTestWaha} className="gap-2">
+                <Search className="w-4 h-4" /> Test Koneksi
+              </Button>
+            </div>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Kosongkan jika WAHA tidak menggunakan autentikasi
-            {wahaApiKey && <span className="ml-1 text-emerald-500 font-medium">· tersimpan</span>}
-          </p>
-        </div>
-        <div className="mt-4">
-          <label className="text-sm font-medium text-slate-700 block mb-1.5">
-            Backend URL Publik
-            <span className="ml-1.5 text-xs font-normal text-slate-400">(untuk webhook)</span>
-          </label>
-          <Input
-            value={backendUrl}
-            onChange={(e) => setBackendUrl(e.target.value)}
-            placeholder="https://yourdomain.com"
-          />
-          <p className="text-xs text-slate-400 mt-1">URL publik server ini — digunakan WAHA untuk mengirim pesan masuk ke dashboard</p>
-        </div>
-        <div className="flex gap-2 mt-4">
-          <Button onClick={handleSaveWaha} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
-            <Save className="w-4 h-4" /> Simpan
-          </Button>
-          <Button variant="outline" onClick={handleTestWaha} className="gap-2">
-            <Search className="w-4 h-4" /> Test Koneksi
-          </Button>
-        </div>
+        )}
       </div>
 
       {/* ── Webhook Setup ── */}
