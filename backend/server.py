@@ -4269,6 +4269,27 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
     uid = current_user["userId"]
 
     if mode == "managed":
+        # Idempotent: jika user sudah managed, kembalikan data lama tanpa reassign
+        existing = await db.users.find_one({"userId": uid})
+        if existing and existing.get("waha_mode") == "managed" and existing.get("managed_session_name"):
+            pool_doc = None
+            existing_pool_id = existing.get("managed_pool_id")
+            if existing_pool_id:
+                from bson import ObjectId as BsonObjectId
+                try:
+                    pool_doc = await db.waha_pool.find_one({"_id": BsonObjectId(existing_pool_id)})
+                except Exception:
+                    pool_doc = None
+            if pool_doc:
+                return {
+                    "success": True,
+                    "mode": "managed",
+                    "session_name": existing["managed_session_name"],
+                    "pool_label": pool_doc.get("label", ""),
+                    "reused": True,
+                }
+
+        # Pilih pool entry dengan slot kosong
         pool_docs = await db.waha_pool.find({"active": True}).sort("created_at", 1).to_list(100)
         assigned = None
         for pd in pool_docs:
@@ -4282,7 +4303,22 @@ async def set_waha_mode(body: dict, current_user: Dict = Depends(get_current_use
             raise HTTPException(status_code=503, detail="Kapasitas WAHA penuh. Hubungi administrator.")
 
         pool_id = str(assigned["_id"])
-        session_name = f"ap_{uid[-8:]}"
+
+        # Generate session name dari username (sanitized), pastikan unik global
+        username = (existing.get("username") if existing else "") or current_user.get("username") or uid
+        base = re.sub(r"[^a-z0-9]", "", username.lower())[:20] or f"u{uid[-6:]}"
+        candidate = f"ap_{base}"
+        suffix = 1
+        # Cek collision di users (managed_session_name) DAN configs (wahaSession)
+        while await db.users.find_one({"managed_session_name": candidate, "userId": {"$ne": uid}}) \
+                or await db.configs.find_one({"wahaSession": candidate, "userId": {"$ne": uid}}):
+            suffix += 1
+            candidate = f"ap_{base}_{suffix}"
+            if suffix > 999:
+                # Fallback ekstrim: tambahkan random
+                candidate = f"ap_{base}_{secrets.token_hex(3)}"
+                break
+        session_name = candidate
 
         await db.users.update_one(
             {"userId": uid},
