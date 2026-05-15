@@ -12,8 +12,12 @@ from typing import Dict, Any, Optional
 # Backend URL
 BASE_URL = "https://design-studio-app-14.preview.emergentagent.com/api"
 
-# Test credentials
-ADMIN_PASSWORD = "admin123"
+# Test credentials.
+# CATATAN: setelah patch keamanan, password awal superadmin TIDAK lagi "admin123".
+# Set via env INITIAL_ADMIN_PASSWORD saat first-run, atau pakai env ADMIN_PASSWORD
+# di lingkungan testing.
+import os as _os
+ADMIN_PASSWORD = _os.environ.get("ADMIN_PASSWORD", "")
 WRONG_PASSWORD = "wrongpassword"
 
 # Global token storage

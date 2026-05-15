@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { getConfig, updateConfig, changePassword } from '../api/apiClient';
-import { Save, Clock, Shield, KeyRound, Database, Globe, Eye, EyeOff } from 'lucide-react';
+import { Save, Clock, Shield, KeyRound, Database, Globe, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
+import { useApp } from '../App';
 
 const SettingsPage = () => {
+  const { currentUser, refreshUser } = useApp();
+  const mustChange = !!currentUser?.mustChangePassword;
   const [config, setConfig] = useState({});
   const [loading, setLoading] = useState(true);
   const [showOldPass, setShowOldPass] = useState(false);
@@ -45,6 +48,10 @@ const SettingsPage = () => {
       const res = await changePassword(oldPassword, newPassword, confirmPassword);
       toast.success(res.message || 'Password berhasil diganti!');
       setOldPassword(''); setNewPassword(''); setConfirmPassword('');
+      // Refresh data user supaya flag mustChangePassword ikut bersih
+      if (typeof refreshUser === 'function') {
+        try { await refreshUser(); } catch (_) {}
+      }
     } catch (e) { toast.error(e.response?.data?.detail || 'Gagal mengganti password'); }
   };
 
@@ -59,6 +66,20 @@ const SettingsPage = () => {
         <h1 className="text-2xl font-bold text-slate-900">Pengaturan Sistem</h1>
         <p className="text-slate-500 text-sm mt-0.5">Konfigurasi zona waktu, keamanan, dan retensi data</p>
       </div>
+
+      {mustChange && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-amber-900">
+            <p className="font-semibold">Anda WAJIB mengganti password sekarang.</p>
+            <p className="text-amber-800/90 mt-1">
+              Akun ini masih menggunakan password awal yang di-generate sistem.
+              Silakan isi formulir <em>“Ganti Password”</em> di bawah dan gunakan
+              password yang kuat (minimal 12 karakter, kombinasi huruf/angka/simbol).
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Zona Waktu */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">

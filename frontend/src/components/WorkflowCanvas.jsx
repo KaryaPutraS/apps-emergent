@@ -306,9 +306,15 @@ const WorkflowCanvas = ({ token }) => {
     const connect=()=>{
       if(!active) return;
       const proto=window.location.protocol==='https:'?'wss':'ws';
-      const url=`${proto}://${window.location.host}/ws/workflow?token=${encodeURIComponent(token)}`;
+      // Token TIDAK lagi disisipkan ke URL (untuk menghindari kebocoran lewat
+      // access-log proxy / referrer). Kirim sebagai frame pertama setelah
+      // koneksi terbuka.
+      const url=`${proto}://${window.location.host}/ws/workflow`;
       try{ws=new WebSocket(url);}catch{if(active)retryTimer=setTimeout(connect,4000);return;}
-      ws.onopen=()=>setConnected(true);
+      ws.onopen=()=>{
+        try{ws.send(JSON.stringify({type:'auth',token:token}));}catch{}
+        setConnected(true);
+      };
       ws.onmessage=(e)=>{
         try{const ev=JSON.parse(e.data);if(ev.type==='heartbeat'||ev.type==='connected')return;pushLog(ev);handleEvent(ev);}catch{}
       };

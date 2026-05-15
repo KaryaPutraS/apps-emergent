@@ -1,6 +1,6 @@
 import React, { useState, createContext, useContext, useCallback, useEffect } from 'react';
 import './App.css';
-import { Toaster } from './components/ui/sonner';
+import { Toaster, toast } from './components/ui/sonner';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import { login as apiLogin, logout as apiLogout, checkSession, getToken, clearToken, getBranding } from './api/apiClient';
@@ -38,7 +38,18 @@ function App() {
       checkSession()
         .then((data) => {
           setIsLoggedIn(true);
-          if (data.user) setCurrentUser(data.user);
+          if (data.user) {
+            setCurrentUser(data.user);
+            if (data.user.mustChangePassword) {
+              setActiveTab('settings');
+              localStorage.setItem('activeTab', 'settings');
+              setTimeout(() => {
+                toast.warning('Password Anda masih default. Silakan ganti password sekarang demi keamanan.', {
+                  duration: 8000,
+                });
+              }, 600);
+            }
+          }
         })
         .catch(() => { clearToken(); })
         .finally(() => setChecking(false));
@@ -52,11 +63,34 @@ function App() {
       const result = await apiLogin(username, password);
       if (result.success) {
         setIsLoggedIn(true);
-        if (result.user) setCurrentUser(result.user);
+        if (result.user) {
+          setCurrentUser(result.user);
+          if (result.user.mustChangePassword) {
+            // Paksa user menuju halaman Pengaturan untuk ganti password
+            setActiveTab('settings');
+            localStorage.setItem('activeTab', 'settings');
+            setTimeout(() => {
+              toast.warning('Password Anda masih default. Wajib diganti sebelum melanjutkan.', {
+                duration: 10000,
+              });
+            }, 600);
+          }
+        }
       }
       return result;
     } catch (e) {
       return { success: false, message: e.response?.data?.detail || 'Gagal login.' };
+    }
+  }, []);
+
+  // Refresh user profile (mis. setelah ganti password supaya mustChangePassword=false)
+  const refreshUser = useCallback(async () => {
+    try {
+      const data = await checkSession();
+      if (data?.user) setCurrentUser(data.user);
+      return data?.user;
+    } catch (e) {
+      return null;
     }
   }, []);
 
@@ -81,6 +115,7 @@ function App() {
     logout,
     branding,
     refreshBranding,
+    refreshUser,
   };
 
   if (checking) {

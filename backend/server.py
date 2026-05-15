@@ -255,7 +255,13 @@ class ImageUpload(BaseModel):
 # ============================================================
 
 SESSION_TTL_SECONDS = 6 * 60 * 60
-DEFAULT_PASSWORD = "admin123"
+
+# Password awal admin diambil dari env INITIAL_ADMIN_PASSWORD bila di-set.
+# Jika tidak, di seed pertama akan di-generate acak dan dicetak ke log + disimpan
+# satu kali ke koleksi config untuk diambil superadmin lewat CLI.
+# Literal "admin123" SUDAH DIHAPUS dari kode untuk menghindari default-credential
+# attack pada deploy baru.
+INITIAL_ADMIN_USERNAME = os.environ.get("INITIAL_ADMIN_USERNAME", "admin").strip().lower() or "admin"
 
 # ── Password policy ──
 _COMMON_PASSWORDS = {
@@ -319,26 +325,45 @@ def check_password(password: str, stored_hash: str) -> bool:
         return False
 
 async def ensure_admin_password():
+    """Maintenance fungsi lama: pastikan koleksi config tidak punya hash legacy
+    dengan algoritma lemah. Tidak lagi me-reset ke password default — bila ada
+    entri legacy SHA-256 yang tertinggal, kita HAPUS supaya tidak menjadi
+    backdoor."""
     config = await db.config.find_one({"key": "admin_password_hash"})
     if not config:
-        hashed = hash_password(DEFAULT_PASSWORD)
-        await db.config.insert_one({"key": "admin_password_hash", "value": hashed, "updated_at": datetime.utcnow()})
-    else:
-        stored = config.get("value", "")
-        # Upgrade legacy SHA-256 hash to bcrypt (more secure)
-        if stored and not stored.startswith(('$2b$', '$2a$', '$2y$')):
-            logger.info("Upgrading legacy password hash to bcrypt...")
-            hashed = hash_password(DEFAULT_PASSWORD)
-            await db.config.update_one(
-                {"key": "admin_password_hash"},
-                {"$set": {"value": hashed, "updated_at": datetime.utcnow()}}
-            )
+        return
+    stored = config.get("value", "")
+    if stored and not stored.startswith(('$2b$', '$2a$', '$2y$')):
+        logger.warning("Menghapus legacy admin_password_hash dari koleksi config.")
+        await db.config.delete_one({"key": "admin_password_hash"})
 
-async def verify_legacy_password(plain: str) -> bool:
-    config = await db.config.find_one({"key": "admin_password_hash"})
-    if not config:
-        return plain == DEFAULT_PASSWORD
-    return check_password(plain, config["value"])
+def _generate_strong_random_password(length: int = 18) -> str:
+    """Generate password acak yang lulus validate_password_strength."""
+    import string
+    alphabet = string.ascii_letters + string.digits + "!@#$%&*+-=?"
+    while True:
+        pwd = ''.join(secrets.choice(alphabet) for _ in range(length))
+        try:
+            validate_password_strength(pwd)
+            return pwd
+        except HTTPException:
+            continue
+
+async def _resolve_initial_admin_password() -> tuple[str, bool]:
+    """Tentukan password awal superadmin saat seed pertama.
+    Return (password, from_env). Jika dari env tidak valid, fallback ke acak.
+    """
+    env_pwd = os.environ.get("INITIAL_ADMIN_PASSWORD", "").strip()
+    if env_pwd:
+        try:
+            validate_password_strength(env_pwd)
+            return env_pwd, True
+        except HTTPException as e:
+            logger.warning(
+                "INITIAL_ADMIN_PASSWORD diabaikan karena tidak lulus kebijakan password: %s",
+                e.detail,
+            )
+    return _generate_strong_random_password(), False
 
 async def create_session(user_id: str = "admin", username: str = "admin", role: str = "admin", full_name: str = "Administrator") -> str:
     token = secrets.token_urlsafe(48)
@@ -353,19 +378,29 @@ async def create_session(user_id: str = "admin", username: str = "admin", role: 
     })
     return token
 
-async def validate_token(authorization: Optional[str] = Header(None)) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
+def _parse_bearer(authorization: Optional[str]) -> str:
+    """Ambil token dari header Authorization secara strict.
+    Tolak skema selain 'Bearer' dan tolak token kosong.
+    """
+    if not authorization:
         raise HTTPException(status_code=401, detail="Token tidak valid. Silakan login ulang.")
-    token = authorization.replace("Bearer ", "")
+    scheme, sep, token = authorization.partition(" ")
+    if not sep or scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Token tidak valid. Silakan login ulang.")
+    token = token.strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Token tidak valid. Silakan login ulang.")
+    return token
+
+async def validate_token(authorization: Optional[str] = Header(None)) -> str:
+    token = _parse_bearer(authorization)
     session = await db.sessions.find_one({"token": token, "expires_at": {"$gt": datetime.utcnow()}})
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Silakan login ulang.")
     return token
 
 async def get_current_user(authorization: Optional[str] = Header(None)) -> Dict:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Token tidak valid. Silakan login ulang.")
-    token = authorization.replace("Bearer ", "")
+    token = _parse_bearer(authorization)
     session = await db.sessions.find_one({"token": token, "expires_at": {"$gt": datetime.utcnow()}})
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Silakan login ulang.")
@@ -507,21 +542,45 @@ async def seed_defaults():
         print(f"[seed] ERROR in seed_defaults (non-fatal): {e}")
 
 
-    # Seed default superadmin user in users collection
+    # Seed default superadmin user in users collection.
+    # CATATAN KEAMANAN:
+    #  - Password awal di-generate ACAK (16+ karakter) bila env INITIAL_ADMIN_PASSWORD
+    #    tidak diset, dan dicetak ke log STARTUP satu kali saja.
+    #  - Flag `mustChangePassword=True` memaksa superadmin pertama mengganti
+    #    password sebelum fitur sensitif bisa dipakai.
     if await db.users.count_documents({}) == 0:
-        hashed = hash_password(DEFAULT_PASSWORD)
+        initial_pwd, from_env = await _resolve_initial_admin_password()
+        hashed = hash_password(initial_pwd)
         await db.users.insert_one({
             "id": str(uuid.uuid4()),
-            "username": "admin",
+            "username": INITIAL_ADMIN_USERNAME,
             "fullName": "Administrator",
             "email": "admin@example.com",
             "role": "superadmin",
             "isActive": True,
             "passwordHash": hashed,
+            "mustChangePassword": True,
             "webhookToken": secrets.token_urlsafe(16),
             "createdAt": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             "lastLogin": None,
         })
+        # Print sekali — superadmin wajib mencatat lalu segera mengganti password.
+        sep = "=" * 72
+        if from_env:
+            logger.warning(
+                "\n%s\n[SEED] Superadmin awal dibuat: username=%r\n"
+                "[SEED] Password diambil dari env INITIAL_ADMIN_PASSWORD.\n"
+                "[SEED] Wajib ganti password pada login pertama.\n%s",
+                sep, INITIAL_ADMIN_USERNAME, sep,
+            )
+        else:
+            logger.warning(
+                "\n%s\n[SEED] Superadmin awal dibuat: username=%r\n"
+                "[SEED] Password awal (ACAK, dicetak hanya kali ini): %s\n"
+                "[SEED] SEGERA ganti password setelah login pertama.\n"
+                "[SEED] Untuk kontrol penuh, set env INITIAL_ADMIN_PASSWORD sebelum start.\n%s",
+                sep, INITIAL_ADMIN_USERNAME, initial_pwd, sep,
+            )
     else:
         # Migrate existing admin roles to superadmin
         await db.users.update_many({"role": "admin"}, {"$set": {"role": "superadmin"}})
@@ -760,6 +819,17 @@ async def startup():
     await db.sessions.create_index("expires_at", expireAfterSeconds=0)
     await db.users.create_index("username", unique=True)
     await db.conversation_summaries.create_index([("chatId", 1), ("userId", 1)])
+    # TTL index untuk rate-limit & landing-page analytics
+    try:
+        await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
+        await db.rate_limits.create_index([("bucket", 1), ("key", 1), ("ts", -1)])
+    except Exception as _e:
+        logger.warning("Gagal membuat index rate_limits: %s", _e)
+    try:
+        # Pertahankan event LP maksimum 90 hari supaya storage tidak meledak
+        await db.lp_events.create_index("ts", expireAfterSeconds=90 * 86400)
+    except Exception as _e:
+        logger.warning("Gagal membuat TTL index lp_events: %s", _e)
     await seed_defaults()
     logger.info("ChatBot Manager backend started")
 
@@ -774,6 +844,62 @@ async def shutdown():
 _login_attempts: dict = {}  # ip -> [timestamp, ...]
 _LOGIN_MAX = 10
 _LOGIN_WINDOW = 300  # 5 menit
+
+# Apakah aplikasi berjalan di belakang reverse proxy yang trusted?
+# Bila TRUE, akan dipakai header X-Forwarded-For / CF-Connecting-IP untuk IP klien.
+_TRUST_PROXY = os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes", "on")
+
+def _get_real_client_ip(request: Request) -> str:
+    """Ambil IP klien yang sesungguhnya.
+    - Bila TRUST_PROXY truthy, baca dari Cf-Connecting-Ip / X-Forwarded-For / X-Real-Ip
+    - Kalau tidak, hanya pakai request.client.host (mencegah header spoofing).
+    """
+    try:
+        if _TRUST_PROXY:
+            for h in ("cf-connecting-ip", "x-real-ip"):
+                v = request.headers.get(h, "").strip()
+                if v:
+                    return v[:64]
+            xff = request.headers.get("x-forwarded-for", "")
+            if xff:
+                # ambil IP paling kiri (paling dekat klien)
+                first = xff.split(",")[0].strip()
+                if first:
+                    return first[:64]
+        if request.client and request.client.host:
+            return request.client.host[:64]
+    except Exception:
+        pass
+    return "unknown"
+
+async def mongo_rate_limit(bucket: str, key: str, max_attempts: int, window_seconds: int) -> None:
+    """Rate-limit persistent berbasis MongoDB. Tahan terhadap restart & multi-worker.
+    Dokumen `rate_limits` punya TTL index pada `expires_at`.
+    """
+    if not key:
+        return
+    now = datetime.utcnow()
+    cutoff = now - timedelta(seconds=window_seconds)
+    coll = db.rate_limits
+    # Bersihkan lewat TTL otomatis; di sini hitung event terbaru
+    count = await coll.count_documents({
+        "bucket": bucket, "key": key, "ts": {"$gt": cutoff}
+    })
+    if count >= max_attempts:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Terlalu banyak request untuk {bucket}. Coba lagi nanti."
+        )
+    try:
+        await coll.insert_one({
+            "bucket": bucket,
+            "key": key,
+            "ts": now,
+            # expires_at dipakai TTL index — dihapus otomatis setelah window habis
+            "expires_at": now + timedelta(seconds=window_seconds + 60),
+        })
+    except Exception:
+        pass
 
 def _is_rate_limited(ip: str) -> bool:
     now = time.time()
@@ -801,11 +927,13 @@ def rate_limit(bucket: str, key: str, max_attempts: int, window_seconds: int) ->
 
 @api_router.post("/auth/login", response_model=LoginResponse)
 async def login(req: LoginRequest, request: Request):
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_real_client_ip(request)
     if _is_rate_limited(client_ip):
         raise HTTPException(status_code=429, detail="Terlalu banyak percobaan login. Coba lagi 5 menit.")
+    # Persistent rate-limit di Mongo (tahan restart & multi-worker)
+    await mongo_rate_limit("login", client_ip, max_attempts=20, window_seconds=600)
 
-    username = req.username.strip().lower() if req.username else "admin"
+    username = req.username.strip().lower() if req.username else INITIAL_ADMIN_USERNAME
 
     # Check users collection first
     user = await db.users.find_one({"username": username, "isActive": True})
@@ -845,22 +973,8 @@ async def login(req: LoginRequest, request: Request):
                 "role": user["role"],
                 "fullName": user.get("fullName", ""),
                 "webhookToken": user.get("webhookToken", ""),
+                "mustChangePassword": bool(user.get("mustChangePassword", False)),
             }
-        )
-
-    # Fall back to legacy admin password ONLY for bootstrap when users collection
-    # is completely empty (defense-in-depth for fresh installs that hit a race
-    # condition with seed_defaults). Removed the unconditional backdoor.
-    user_count = await db.users.count_documents({})
-    if user_count == 0 and username == "admin" and req.password == DEFAULT_PASSWORD:
-        token = await create_session(user_id="admin", username="admin", role="superadmin", full_name="Administrator")
-        await add_log("LOGIN_SUCCESS", "Admin login berhasil (bootstrap)")
-        await log_user_activity("admin", "admin", "LOGIN", "Login berhasil (bootstrap)")
-        return LoginResponse(
-            success=True,
-            token=token,
-            message="Login berhasil",
-            user={"userId": "admin", "username": "admin", "role": "superadmin", "fullName": "Administrator"}
         )
 
     _record_attempt(client_ip)
@@ -880,6 +994,7 @@ async def check_session(current_user: Dict = Depends(get_current_user)):
     # Fetch webhookToken from users collection
     user_doc = await db.users.find_one({"id": current_user["userId"]})
     webhook_token = user_doc.get("webhookToken", "") if user_doc else ""
+    must_change = bool(user_doc.get("mustChangePassword", False)) if user_doc else False
     return {
         "valid": True,
         "license": license_doc,
@@ -889,6 +1004,7 @@ async def check_session(current_user: Dict = Depends(get_current_user)):
             "role": current_user["role"],
             "fullName": current_user["fullName"],
             "webhookToken": webhook_token,
+            "mustChangePassword": must_change,
         }
     }
 
@@ -1778,7 +1894,29 @@ async def test_ai(req: TestRequest, current_user: Dict = Depends(get_current_use
 
 @app.websocket("/ws/workflow")
 async def workflow_ws(websocket: WebSocket, token: str = ""):
-    # Authenticate via query parameter (WebSocket can't use custom headers easily)
+    """Autentikasi WebSocket.
+    Diutamakan: client mengirim frame pertama {"type":"auth","token":"..."}.
+    Backward-compat: query string ?token= masih diterima (deprecated, akan dihapus).
+    """
+    await websocket.accept()
+    # Bila query token tidak diberikan, tunggu first-frame auth maks 5 detik.
+    if not token:
+        try:
+            raw = await asyncio.wait_for(websocket.receive_text(), timeout=5)
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                msg = {}
+            if isinstance(msg, dict) and msg.get("type") == "auth":
+                token = str(msg.get("token") or "").strip()
+        except asyncio.TimeoutError:
+            await websocket.close(code=4001)
+            return
+        except WebSocketDisconnect:
+            return
+        except Exception:
+            await websocket.close(code=4001)
+            return
     if not token:
         await websocket.close(code=4001)
         return
@@ -1787,7 +1925,6 @@ async def workflow_ws(websocket: WebSocket, token: str = ""):
         await websocket.close(code=4001)
         return
     uid = session["userId"]
-    await websocket.accept()
     q = _get_wf_queue(uid)
     # Drain stale events
     while not q.empty():
@@ -1898,7 +2035,10 @@ async def change_password(req: ChangePasswordRequest, current_user: Dict = Depen
         if not check_password(req.currentPassword, user.get("passwordHash", "")):
             raise HTTPException(status_code=400, detail="Password lama salah.")
         hashed = hash_password(req.newPassword)
-        await db.users.update_one({"id": user_id}, {"$set": {"passwordHash": hashed}})
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"passwordHash": hashed, "mustChangePassword": False}},
+        )
         await db.sessions.delete_many({"userId": user_id})
         new_token = await create_session(
             user_id=user_id,
@@ -3412,19 +3552,27 @@ class DemoRegisterRequest(BaseModel):
     email: Optional[str] = ""
 
 @api_router.post("/public/demo-register")
-async def demo_register(req: DemoRegisterRequest):
+async def demo_register(req: DemoRegisterRequest, request: Request):
     """Public endpoint: create a 14-day demo user + license, no auth required."""
-    name = req.name.strip()
-    phone = req.phone.strip()
-    email = req.email.strip() if req.email else ""
+    name = (req.name or "").strip()[:80]
+    phone = (req.phone or "").strip()[:32]
+    email = (req.email or "").strip()[:120]
 
     if not name:
         raise HTTPException(status_code=400, detail="Nama tidak boleh kosong.")
     if not phone:
         raise HTTPException(status_code=400, detail="Nomor WhatsApp tidak boleh kosong.")
+    # Validasi format nomor: minimal 8 digit setelah normalisasi
+    _digits_only = re.sub(r'\D', '', phone)
+    if len(_digits_only) < 8 or len(_digits_only) > 15:
+        raise HTTPException(status_code=400, detail="Nomor WhatsApp tidak valid (8–15 digit).")
 
-    # Rate limit: max 3 registrations per phone per hour
-    rate_limit("demo_register", phone, max_attempts=3, window_seconds=3600)
+    client_ip = _get_real_client_ip(request)
+    # Persistent rate limit: max 3 registrasi per phone/jam DAN max 5 per IP/hari.
+    await mongo_rate_limit("demo_register_phone", _digits_only, max_attempts=3, window_seconds=3600)
+    await mongo_rate_limit("demo_register_ip", client_ip, max_attempts=5, window_seconds=86400)
+    # Fallback in-memory (compat)
+    rate_limit("demo_register", _digits_only, max_attempts=3, window_seconds=3600)
 
     # Generate username from phone digits
     digits = re.sub(r'\D', '', phone)
@@ -3536,6 +3684,153 @@ async def demo_register(req: DemoRegisterRequest):
         "message": f"Akun demo berhasil dibuat! Aktif 14 hari hingga {expires_at.strftime('%d %B %Y')}.",
     }
 
+# ── HTML sanitizer untuk konten landing page ──
+# Daftar tag yang aman untuk rich-text editor LP. Selain ini akan di-strip.
+_LP_ALLOWED_TAGS = {
+    "b", "strong", "i", "em", "u", "br", "span", "a",
+    "p", "ul", "ol", "li", "small", "sup", "sub", "mark",
+}
+# Atribut yang diizinkan per-tag. Atribut style/onclick/dst SELALU di-strip.
+_LP_ALLOWED_ATTRS = {
+    "a": {"href", "title", "target", "rel"},
+    "span": {"class"},
+    "p": {"class"},
+}
+_LP_SAFE_URL_RE = re.compile(r'^(https?:|mailto:|tel:|#|/)', re.I)
+
+def _sanitize_lp_html(value: str, max_len: int = 4000) -> str:
+    """Hapus tag/atribut yang tidak ada di allowlist.
+    Implementasi minimal pakai stdlib HTMLParser untuk menghindari dependency baru.
+    Hasil sudah aman untuk dimasukkan ke innerHTML.
+    """
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    if len(value) > max_len:
+        value = value[:max_len]
+
+    from html.parser import HTMLParser
+    from html import escape as _html_escape
+
+    out_parts: list = []
+
+    class _Sanitizer(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.depth = 0
+            self.skip_depth = 0  # >0 berarti kita di dalam tag yang di-skip
+
+        def handle_starttag(self, tag, attrs):
+            tag = tag.lower()
+            if tag not in _LP_ALLOWED_TAGS:
+                # skip seluruh isi <script>/<style> agar tidak bocor ke output
+                if tag in ("script", "style", "iframe", "object", "embed"):
+                    self.skip_depth += 1
+                return
+            allowed_attrs = _LP_ALLOWED_ATTRS.get(tag, set())
+            safe_attrs = []
+            for k, v in attrs:
+                if not k or k.lower() not in allowed_attrs:
+                    continue
+                if v is None:
+                    continue
+                kl = k.lower()
+                if kl == "href":
+                    if not _LP_SAFE_URL_RE.match(v.strip()):
+                        continue
+                # Pasang rel=noopener untuk target=_blank
+                safe_attrs.append((kl, v))
+            attr_str = "".join(
+                f' {k}="{_html_escape(v, quote=True)}"' for k, v in safe_attrs
+            )
+            if tag == "a":
+                # paksa rel noopener kalau ada target
+                if any(k == "target" for k, _ in safe_attrs) and not any(k == "rel" for k, _ in safe_attrs):
+                    attr_str += ' rel="noopener noreferrer"'
+            if tag == "br":
+                out_parts.append("<br/>")
+            else:
+                out_parts.append(f"<{tag}{attr_str}>")
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            tag = tag.lower()
+            if tag in ("script", "style", "iframe", "object", "embed") and self.skip_depth > 0:
+                self.skip_depth -= 1
+                return
+            if tag not in _LP_ALLOWED_TAGS or tag == "br":
+                return
+            out_parts.append(f"</{tag}>")
+            self.depth = max(0, self.depth - 1)
+
+        def handle_data(self, data):
+            if self.skip_depth > 0:
+                return
+            out_parts.append(_html_escape(data, quote=False))
+
+    try:
+        s = _Sanitizer()
+        s.feed(value)
+        s.close()
+    except Exception:
+        # Bila parser meledak, fallback aman: escape semuanya
+        from html import escape as _html_escape
+        return _html_escape(value)
+    return "".join(out_parts)
+
+# Daftar field LP yang BOLEH mengandung HTML (akan disanitasi dengan allowlist).
+# Field selain ini akan diperlakukan sebagai plain text (HTML di-strip total).
+_LP_HTML_FIELDS = {
+    "promo_bar", "sub", "note", "final_h2", "final_sub", "a",
+    "hero.sub", "pricing.note", "links.final_h2", "links.final_sub",
+}
+# Headline adalah array of string yang bercampur tag <span class="accent italic">.
+_LP_HEADLINE_PATHS = {"hero.headline"}
+
+def _strip_html_to_text(s: str, max_len: int = 1000) -> str:
+    if not s:
+        return ""
+    if not isinstance(s, str):
+        s = str(s)
+    # Strip semua tag HTML untuk plain-text field
+    txt = re.sub(r"<[^>]+>", "", s)
+    return txt[:max_len]
+
+def _sanitize_lp_dict(node: Any, path: str = "") -> Any:
+    """Recursive sanitization. Untuk field di _LP_HTML_FIELDS → allowlist sanitizer,
+    untuk field lain → strip semua HTML.
+    """
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if not isinstance(k, str):
+                continue
+            # tolak key mongo metadata
+            if k.startswith("$") or k.startswith("_"):
+                continue
+            sub_path = f"{path}.{k}" if path else k
+            out[k] = _sanitize_lp_dict(v, sub_path)
+        return out
+    if isinstance(node, list):
+        # Kasus khusus headline (list of HTML strings)
+        if path in _LP_HEADLINE_PATHS:
+            return [_sanitize_lp_html(item, 200) if isinstance(item, str) else item
+                    for item in node[:10]]
+        # FAQ list: tiap item dict berisi q (text) + a (html)
+        return [_sanitize_lp_dict(item, path) for item in node[:50]]
+    if isinstance(node, str):
+        leaf = path.rsplit(".", 1)[-1]
+        # treat semua field 'a' (jawaban FAQ) sebagai HTML, dan field di whitelist
+        if leaf in _LP_HTML_FIELDS or path in _LP_HTML_FIELDS:
+            return _sanitize_lp_html(node, 4000)
+        return _strip_html_to_text(node, 2000)
+    # bool / int / float / None → biarkan
+    if isinstance(node, (bool, int, float)) or node is None:
+        return node
+    # tipe lain → drop
+    return None
+
 @api_router.get("/lp-content")
 async def get_lp_content():
     """Public: returns landing page editable content."""
@@ -3547,13 +3842,20 @@ async def get_lp_content():
 
 @api_router.put("/admin/lp-content")
 async def update_lp_content(content: dict, admin: Dict = Depends(require_superadmin)):
-    """Superadmin: update landing page content."""
+    """Superadmin: update landing page content. Semua field HTML dilewatkan
+    sanitizer allowlist untuk mencegah stored-XSS di landing page publik."""
+    if not isinstance(content, dict):
+        raise HTTPException(status_code=400, detail="Payload tidak valid.")
     content.pop("_id", None)
+    safe = _sanitize_lp_dict(content)
+    if not isinstance(safe, dict):
+        raise HTTPException(status_code=400, detail="Payload tidak valid setelah sanitasi.")
     await db.lp_content.replace_one(
         {"_id": "main"},
-        {"_id": "main", **content},
+        {"_id": "main", **safe},
         upsert=True,
     )
+    await add_log("LP_CONTENT_UPDATE", f"[{admin['username']}] LP content diperbarui (sanitasi aktif)")
     return {"ok": True}
 
 # ============================================================
@@ -3594,20 +3896,40 @@ def _parse_os(ua: str) -> str:
 @api_router.post("/lp-track")
 async def lp_track(ev: LPEvent, request: Request):
     """Public: record landing page analytics event."""
+    # Validasi & batasi panjang field bebas dari klien
+    sid = (ev.session_id or "")[:80]
+    etype = (ev.event_type or "")[:32]
+    if not sid or not etype:
+        return {"ok": False, "reason": "missing_field"}
+    if etype not in ("pageview", "heartbeat", "click", "scroll", "unload"):
+        return {"ok": False, "reason": "unknown_event"}
+
     ua = request.headers.get("user-agent", "")[:300]
-    ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
-    country = request.headers.get("cf-ipcountry", "") or ""
+    ip = _get_real_client_ip(request)
+    country = request.headers.get("cf-ipcountry", "")[:8] or ""
+
+    # Anti-flood: maksimum 300 event per session per 10 menit.
+    # Tidak melempar exception agar klien tidak crash — cukup di-drop diam.
+    try:
+        recent = await db.lp_events.count_documents(
+            {"session_id": sid, "ts": {"$gt": datetime.utcnow() - timedelta(minutes=10)}}
+        )
+        if recent > 300:
+            return {"ok": False, "reason": "rate_limited"}
+    except Exception:
+        pass
+
     doc = {
-        "session_id": ev.session_id,
-        "event_type": ev.event_type,
-        "template": ev.template or "default",
-        "path": ev.path or "/",
+        "session_id": sid,
+        "event_type": etype,
+        "template": (ev.template or "default")[:60],
+        "path": (ev.path or "/")[:200],
         "referrer": (ev.referrer or "")[:500],
-        "target": ev.target or "",
+        "target": (ev.target or "")[:80],
         "scroll_pct": ev.scroll_pct,
         "viewport_w": ev.viewport_w,
         "viewport_h": ev.viewport_h,
-        "device": ev.device or "",
+        "device": (ev.device or "")[:16],
         "duration_ms": ev.duration_ms,
         "ip": ip,
         "country": country,
