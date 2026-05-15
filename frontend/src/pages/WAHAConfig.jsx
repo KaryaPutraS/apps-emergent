@@ -8,6 +8,21 @@ import { Button } from '../components/ui/button';
 import apiClient from '../api/apiClient';
 import { getWahaPool, createWahaPoolEntry, updateWahaPoolEntry, deleteWahaPoolEntry } from '../api/apiClient';
 
+const DEFAULT_TEMPLATE =
+`Halo kak {customer_name}, berikut akun & lisensi ChatBot Anda:
+
+👤 Username: {username}
+🔒 Password: {password}
+
+🔑 License Key:
+{license_key}
+
+📦 Produk: {product_code}
+💎 Plan: {plan_name}
+📅 Berlaku hingga: {expires_at}
+
+Silakan login di dashboard dan simpan informasi ini dengan baik. Terima kasih 🙏`;
+
 const TEMPLATE_VARS = [
   { var: '{customer_name}', desc: 'Nama customer' },
   { var: '{username}', desc: 'Username login (dari Kelola User)' },
@@ -496,10 +511,19 @@ export default function WAHAConfig() {
 
               {/* Template Pesan */}
               <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
-                <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <MessageSquare size={16} className="text-green-500" />
-                  Template Pesan Lisensi
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                    <MessageSquare size={16} className="text-green-500" />
+                    Template Pesan Lisensi & Akun
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => { if (window.confirm('Reset template ke default baru (dengan username & password)?')) set('license_message_template', DEFAULT_TEMPLATE); }}
+                    className="text-xs text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-400 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Reset ke Default
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {TEMPLATE_VARS.map(v => (
                     <button key={v.var} type="button" onClick={() => insertVar(v.var)} title={v.desc}
