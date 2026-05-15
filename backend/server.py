@@ -4067,6 +4067,7 @@ async def delete_chatbot_license(license_key: str, admin: Dict = Depends(require
 class SendLicenseWahaReq(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
+    template_key: Optional[str] = None  # "license_message_template" (default) or "account_message_template"
 
 @api_router.post("/superadmin/licenses/{license_key}/send-waha")
 async def send_license_via_waha(
@@ -4085,7 +4086,11 @@ async def send_license_via_waha(
     waha_url = (waha_cfg_doc.get("waha_url") or "").rstrip("/")
     waha_session = waha_cfg_doc.get("waha_session") or "default"
     waha_api_key = waha_cfg_doc.get("waha_api_key") or ""
-    template = waha_cfg_doc.get("license_message_template") or "{license_key}"
+    # Pick template — default is license-only, account flow passes account_message_template
+    template_key = (req.template_key if req else None) or "license_message_template"
+    if template_key not in ("license_message_template", "account_message_template"):
+        template_key = "license_message_template"
+    template = waha_cfg_doc.get(template_key) or WAHA_SETTINGS_DEFAULTS.get(template_key) or "{license_key}"
 
     phone = (doc.get("customer_phone") or "").strip()
     if not phone:
@@ -4167,6 +4172,14 @@ WAHA_SETTINGS_DEFAULTS = {
     "waha_session": "default",
     "waha_api_key": "",
     "license_message_template": (
+        "Halo kak {customer_name}, berikut lisensi ChatBot Anda:\n\n"
+        "🔑 License Key:\n{license_key}\n\n"
+        "📦 Produk: {product_code}\n"
+        "💎 Plan: {plan_name}\n"
+        "📅 Berlaku hingga: {expires_at}\n\n"
+        "Silakan simpan license key ini dengan baik. Terima kasih 🙏"
+    ),
+    "account_message_template": (
         "Halo kak {customer_name}, berikut akun & lisensi ChatBot Anda:\n\n"
         "👤 Username: {username}\n"
         "🔒 Password: {password}\n\n"

@@ -8,7 +8,19 @@ import { Button } from '../components/ui/button';
 import apiClient from '../api/apiClient';
 import { getWahaPool, createWahaPoolEntry, updateWahaPoolEntry, deleteWahaPoolEntry } from '../api/apiClient';
 
-const DEFAULT_TEMPLATE =
+const DEFAULT_LICENSE_TEMPLATE =
+`Halo kak {customer_name}, berikut lisensi ChatBot Anda:
+
+🔑 License Key:
+{license_key}
+
+📦 Produk: {product_code}
+💎 Plan: {plan_name}
+📅 Berlaku hingga: {expires_at}
+
+Silakan simpan license key ini dengan baik. Terima kasih 🙏`;
+
+const DEFAULT_ACCOUNT_TEMPLATE =
 `Halo kak {customer_name}, berikut akun & lisensi ChatBot Anda:
 
 👤 Username: {username}
@@ -380,23 +392,34 @@ export default function WAHAConfig() {
     }
   };
 
-  const insertVar = (varName) => {
-    const el = document.getElementById('template-textarea');
+  const insertVarInto = (fieldKey, textareaId) => (varName) => {
+    const el = document.getElementById(textareaId);
     if (!el) {
-      set('license_message_template', (config.license_message_template || '') + varName);
+      set(fieldKey, (config[fieldKey] || '') + varName);
       return;
     }
     const start = el.selectionStart;
     const end = el.selectionEnd;
-    const text = config.license_message_template || '';
+    const text = config[fieldKey] || '';
     const newText = text.slice(0, start) + varName + text.slice(end);
-    set('license_message_template', newText);
+    set(fieldKey, newText);
     setTimeout(() => {
       el.focus();
       el.selectionStart = start + varName.length;
       el.selectionEnd = start + varName.length;
     }, 0);
   };
+
+  const renderPreview = (tmpl) => (tmpl || '')
+    .replaceAll('{customer_name}', 'Budi Santoso')
+    .replaceAll('{username}', 'budi_santoso')
+    .replaceAll('{password}', 'Rahasia#2025')
+    .replaceAll('{license_key}', 'ADMP-AB12-CD34-EF56')
+    .replaceAll('{product_code}', 'adminpintar_chatbot')
+    .replaceAll('{plan_name}', 'Pro')
+    .replaceAll('{expires_at}', '31 Desember 2025')
+    .replaceAll('{customer_phone}', '08123456789')
+    .replaceAll('{customer_email}', 'budi@email.com');
 
   const TABS = [
     { id: 'config', label: 'Konfigurasi WAHA' },
@@ -509,49 +532,83 @@ export default function WAHAConfig() {
                 </div>
               </div>
 
-              {/* Template Pesan */}
+              {/* Template Pesan Lisensi (untuk pengiriman dari ChatBot Lisensi) */}
               <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-                    <MessageSquare size={16} className="text-green-500" />
-                    Template Pesan Lisensi & Akun
-                  </h2>
+                  <div>
+                    <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <MessageSquare size={16} className="text-green-500" />
+                      Template Pesan Lisensi
+                    </h2>
+                    <p className="text-xs text-gray-400 mt-1">Digunakan saat kirim lisensi dari menu ChatBot Lisensi (tanpa akun login).</p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => { if (window.confirm('Reset template ke default baru (dengan username & password)?')) set('license_message_template', DEFAULT_TEMPLATE); }}
-                    className="text-xs text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-400 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-colors"
+                    onClick={() => { if (window.confirm('Reset template lisensi ke default?')) set('license_message_template', DEFAULT_LICENSE_TEMPLATE); }}
+                    className="text-xs text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-400 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    Reset ke Default
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {TEMPLATE_VARS.filter(v => v.var !== '{username}' && v.var !== '{password}').map(v => (
+                    <button key={v.var} type="button" onClick={() => insertVarInto('license_message_template', 'license-template-textarea')(v.var)} title={v.desc}
+                      className="px-2.5 py-1 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-mono rounded-lg border border-green-200 transition-colors">
+                      {v.var}
+                    </button>
+                  ))}
+                </div>
+                <textarea id="license-template-textarea" value={config.license_message_template || ''}
+                  onChange={e => set('license_message_template', e.target.value)}
+                  rows={9}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y font-mono"
+                  placeholder="Tulis template pesan lisensi..." />
+                {config.license_message_template && (
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-200">Preview Pesan</div>
+                    <div className="p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed bg-white">
+                      {renderPreview(config.license_message_template)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Template Pesan Akun & Lisensi (untuk pengiriman dari Kelola User) */}
+              <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <MessageSquare size={16} className="text-blue-500" />
+                      Template Pesan Akun & Lisensi
+                    </h2>
+                    <p className="text-xs text-gray-400 mt-1">Digunakan saat kirim akun + lisensi ke user dari menu Kelola User. Menyertakan username & password.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { if (window.confirm('Reset template akun & lisensi ke default?')) set('account_message_template', DEFAULT_ACCOUNT_TEMPLATE); }}
+                    className="text-xs text-amber-600 hover:text-amber-700 border border-amber-200 hover:border-amber-400 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
                   >
                     Reset ke Default
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {TEMPLATE_VARS.map(v => (
-                    <button key={v.var} type="button" onClick={() => insertVar(v.var)} title={v.desc}
-                      className="px-2.5 py-1 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-mono rounded-lg border border-green-200 transition-colors">
+                    <button key={v.var} type="button" onClick={() => insertVarInto('account_message_template', 'account-template-textarea')(v.var)} title={v.desc}
+                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-mono rounded-lg border border-blue-200 transition-colors">
                       {v.var}
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-gray-400">Klik variabel di atas untuk menyisipkan ke template</p>
-                <textarea id="template-textarea" value={config.license_message_template || ''}
-                  onChange={e => set('license_message_template', e.target.value)}
-                  rows={10}
+                <textarea id="account-template-textarea" value={config.account_message_template || ''}
+                  onChange={e => set('account_message_template', e.target.value)}
+                  rows={11}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-y font-mono"
-                  placeholder="Tulis template pesan..." />
-                {config.license_message_template && (
+                  placeholder="Tulis template pesan akun & lisensi..." />
+                {config.account_message_template && (
                   <div className="border border-gray-200 rounded-xl overflow-hidden">
                     <div className="bg-gray-50 px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-200">Preview Pesan</div>
                     <div className="p-4 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed bg-white">
-                      {config.license_message_template
-                        .replace('{customer_name}', 'Budi Santoso')
-                        .replace('{username}', 'budi_santoso')
-                        .replace('{password}', 'Rahasia#2025')
-                        .replace('{license_key}', 'ADMP-AB12-CD34-EF56')
-                        .replace('{product_code}', 'adminpintar_chatbot')
-                        .replace('{plan_name}', 'Pro')
-                        .replace('{expires_at}', '31 Desember 2025')
-                        .replace('{customer_phone}', '08123456789')
-                        .replace('{customer_email}', 'budi@email.com')}
+                      {renderPreview(config.account_message_template)}
                     </div>
                   </div>
                 )}

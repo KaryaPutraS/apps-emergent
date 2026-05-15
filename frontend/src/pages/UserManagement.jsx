@@ -319,7 +319,11 @@ const LicenseAfterUserModal = ({ user, password, onClose, onDone }) => {
     if (!form.customer_phone.trim()) { toast.error('Nomor HP customer kosong, tidak bisa kirim'); return; }
     setSending(true);
     try {
-      await sendLicenseWaha(created.license_key, { username: user.username, password });
+      await sendLicenseWaha(created.license_key, {
+        username: user.username,
+        password,
+        template_key: 'account_message_template',
+      });
       toast.success('Pesan akun & lisensi terkirim via WhatsApp');
       onDone();
     } catch (err) {
@@ -473,6 +477,7 @@ const SendToUserModal = ({ user, onClose }) => {
       await sendLicenseWaha(license.license_key, {
         username: user.username,
         password: resetPassword && password ? password : '',
+        template_key: 'account_message_template',
       });
       toast.success('Pesan terkirim ke user');
       onClose();
