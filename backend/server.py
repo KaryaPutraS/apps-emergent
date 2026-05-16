@@ -3826,7 +3826,10 @@ _LP_HTML_FIELDS = {
     "footer.description", "footer.copyright",
 }
 # Field URL — disanitasi sebagai URL aman (skema dibatasi), bukan teks/HTML.
-_LP_URL_LEAVES = {"url", "whatsapp", "activation", "favicon_url", "logo_url"}
+_LP_URL_LEAVES = {"url", "whatsapp", "activation"}
+# Field URL yang JUGA boleh data:image (untuk image uploader inline).
+# data:image/svg+xml tetap diblokir karena bisa berisi script.
+_LP_IMAGE_URL_LEAVES = {"favicon_url", "logo_url"}
 # Headline adalah array of string yang bercampur tag <span class="accent italic">.
 _LP_HEADLINE_PATHS = {"hero.headline"}
 
@@ -3855,6 +3858,31 @@ def _sanitize_url(s: str, max_len: int = 500) -> str:
     # Skema tidak aman → kosongkan
     return ""
 
+# Maksimum 2 MB untuk image data URL inline (sudah cukup besar untuk favicon/logo)
+_LP_IMAGE_URL_MAX = 2 * 1024 * 1024
+
+def _sanitize_image_url(s: str) -> str:
+    """Untuk favicon_url / logo_url: izinkan http(s)://... DAN data:image/...;base64,...
+    kecuali SVG (yang bisa berisi script). Pakai validator yang sudah ada.
+    """
+    if not s or not isinstance(s, str):
+        return ""
+    v = s.strip()
+    if not v:
+        return ""
+    lower = v.lower()
+    if lower.startswith("data:"):
+        # Reuse validator yang sudah ada — tolak SVG & non-image
+        try:
+            validate_image_data_url(v, "Gambar")
+        except HTTPException:
+            return ""
+        if len(v) > _LP_IMAGE_URL_MAX:
+            return ""
+        return v[:_LP_IMAGE_URL_MAX]
+    # Selain data:, fallback ke URL-safe biasa
+    return _sanitize_url(v, 1000)
+
 def _sanitize_lp_dict(node: Any, path: str = "") -> Any:
     """Recursive sanitization. Untuk field di _LP_HTML_FIELDS → allowlist sanitizer,
     field URL → URL-safe check, sisanya → strip semua HTML.
@@ -3880,6 +3908,9 @@ def _sanitize_lp_dict(node: Any, path: str = "") -> Any:
         return [_sanitize_lp_dict(item, path) for item in node[:50]]
     if isinstance(node, str):
         leaf = path.rsplit(".", 1)[-1]
+        # Image-URL fields → izinkan data:image/png|jpeg|webp|gif (selain SVG)
+        if leaf in _LP_IMAGE_URL_LEAVES:
+            return _sanitize_image_url(node)
         # URL fields → safe URL only
         if leaf in _LP_URL_LEAVES:
             return _sanitize_url(node, 500)
