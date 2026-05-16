@@ -89,6 +89,7 @@ const TABS = [
   { id: 'pricing',  label: '💰 Harga' },
   { id: 'faq',      label: '❓ FAQ' },
   { id: 'links',    label: '🔗 Link & CTA' },
+  { id: 'footer',   label: '🦶 Footer' },
 ];
 
 // ─── Tab: Template ────────────────────────────────────────────────────────
@@ -568,6 +569,188 @@ const LinksTab = ({ data, onChange }) => {
   );
 };
 
+// ─── Tab: Footer ──────────────────────────────────────────────────────────
+const FOOTER_DEFAULT = {
+  description: '',
+  columns: [],
+  copyright: '',
+  legal_links: [],
+};
+
+const FooterTab = ({ data, onChange }) => {
+  const ftr = data.footer || FOOTER_DEFAULT;
+  const set = (k, v) => onChange({ ...data, footer: { ...ftr, [k]: v } });
+
+  // ── Columns helpers ──
+  const cols = Array.isArray(ftr.columns) ? ftr.columns : [];
+  const setCols = (newCols) => set('columns', newCols);
+  const updateCol = (i, patch) => setCols(cols.map((c, idx) => idx === i ? { ...c, ...patch } : c));
+  const addCol = () => setCols([...cols, { title: 'Kolom Baru', links: [] }]);
+  const removeCol = (i) => setCols(cols.filter((_, idx) => idx !== i));
+  const moveCol = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= cols.length) return;
+    const arr = [...cols];
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    setCols(arr);
+  };
+
+  // ── Links inside a column ──
+  const addLink = (colIdx) => {
+    const c = cols[colIdx] || { links: [] };
+    const links = Array.isArray(c.links) ? c.links : [];
+    updateCol(colIdx, { links: [...links, { label: '', url: '#' }] });
+  };
+  const updateLink = (colIdx, linkIdx, patch) => {
+    const c = cols[colIdx] || { links: [] };
+    const links = (Array.isArray(c.links) ? c.links : []).map((lk, idx) => idx === linkIdx ? { ...lk, ...patch } : lk);
+    updateCol(colIdx, { links });
+  };
+  const removeLink = (colIdx, linkIdx) => {
+    const c = cols[colIdx] || { links: [] };
+    const links = (Array.isArray(c.links) ? c.links : []).filter((_, idx) => idx !== linkIdx);
+    updateCol(colIdx, { links });
+  };
+
+  // ── Legal links ──
+  const legal = Array.isArray(ftr.legal_links) ? ftr.legal_links : [];
+  const setLegal = (newLegal) => set('legal_links', newLegal);
+  const addLegal = () => setLegal([...legal, { label: '', url: '#' }]);
+  const updateLegal = (i, patch) => setLegal(legal.map((lk, idx) => idx === i ? { ...lk, ...patch } : lk));
+  const removeLegal = (i) => setLegal(legal.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="space-y-4">
+      <Card title="Deskripsi Brand (kolom kiri footer)">
+        <Label hint="muncul di bawah logo footer · HTML diizinkan (misal <strong>...</strong>)">Deskripsi Singkat</Label>
+        <Textarea
+          value={ftr.description}
+          onChange={v => set('description', v)}
+          placeholder="Asisten WhatsApp otomatis untuk UMKM Indonesia..."
+          rows={3}
+        />
+      </Card>
+
+      <Card title="Kolom Footer (Produk / Perusahaan / Dukungan / dll)">
+        <div className="space-y-3">
+          {cols.length === 0 && (
+            <div className="text-sm text-slate-400 italic">Belum ada kolom. Klik tombol di bawah untuk menambah.</div>
+          )}
+          {cols.map((col, ci) => {
+            const links = Array.isArray(col?.links) ? col.links : [];
+            return (
+              <div key={ci} className="border border-slate-200 rounded-lg p-4 bg-slate-50/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex-1">
+                    <Label>Judul Kolom #{ci + 1}</Label>
+                    <Input
+                      value={col?.title || ''}
+                      onChange={v => updateCol(ci, { title: v })}
+                      placeholder="Produk / Perusahaan / Dukungan"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 pt-5">
+                    <button type="button" onClick={() => moveCol(ci, -1)} disabled={ci === 0}
+                      className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-100 disabled:opacity-30">
+                      ↑
+                    </button>
+                    <button type="button" onClick={() => moveCol(ci, 1)} disabled={ci === cols.length - 1}
+                      className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-100 disabled:opacity-30">
+                      ↓
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => removeCol(ci)}
+                    className="text-red-500 hover:text-red-700 p-2 mt-5"
+                    title="Hapus kolom">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="pl-2 space-y-2">
+                  <Label hint="setiap baris = 1 link · biarkan URL '#' untuk placeholder">Daftar Link</Label>
+                  {links.length === 0 && (
+                    <div className="text-xs text-slate-400 italic py-1">Belum ada link di kolom ini.</div>
+                  )}
+                  {links.map((lk, li) => (
+                    <div key={li} className="flex items-center gap-2">
+                      <Input
+                        value={lk?.label || ''}
+                        onChange={v => updateLink(ci, li, { label: v })}
+                        placeholder="Teks Link (mis. Fitur)"
+                        className="flex-1"
+                      />
+                      <Input
+                        value={lk?.url || ''}
+                        onChange={v => updateLink(ci, li, { url: v })}
+                        placeholder="URL (mis. #fitur atau https://...)"
+                        className="flex-1"
+                      />
+                      <button type="button" onClick={() => removeLink(ci, li)}
+                        className="text-red-400 hover:text-red-600 p-1 flex-shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => addLink(ci)}
+                    className="flex items-center gap-1.5 text-sm text-emerald-600 hover:text-emerald-700 mt-1">
+                    <Plus className="w-3.5 h-3.5" /> Tambah Link
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          <button type="button" onClick={addCol}
+            className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:text-emerald-700">
+            <Plus className="w-4 h-4" /> Tambah Kolom Footer
+          </button>
+        </div>
+      </Card>
+
+      <Card title="Copyright & Link Legal (baris paling bawah)">
+        <div>
+          <Label hint="HTML diizinkan · misal: &copy; 2025 ...">Teks Copyright</Label>
+          <Input
+            value={ftr.copyright}
+            onChange={v => set('copyright', v)}
+            placeholder="© 2025 AdminPintar.id — All rights reserved."
+          />
+        </div>
+        <div className="pt-2">
+          <Label hint="biasanya: Kebijakan Privasi, Syarat & Ketentuan">Link Legal</Label>
+          <div className="space-y-2">
+            {legal.length === 0 && (
+              <div className="text-xs text-slate-400 italic py-1">Belum ada link legal.</div>
+            )}
+            {legal.map((lk, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input
+                  value={lk?.label || ''}
+                  onChange={v => updateLegal(i, { label: v })}
+                  placeholder="Teks (mis. Kebijakan Privasi)"
+                  className="flex-1"
+                />
+                <Input
+                  value={lk?.url || ''}
+                  onChange={v => updateLegal(i, { url: v })}
+                  placeholder="URL"
+                  className="flex-1"
+                />
+                <button type="button" onClick={() => removeLegal(i)}
+                  className="text-red-400 hover:text-red-600 p-1 flex-shrink-0">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={addLegal}
+              className="flex items-center gap-1.5 text-sm text-emerald-600 hover:text-emerald-700 mt-1">
+              <Plus className="w-3.5 h-3.5" /> Tambah Link Legal
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
 // ─── Main Page ─────────────────────────────────────────────────────────────
 const LPEditor = () => {
   const [activeTab, setActiveTab] = useState('template');
@@ -669,6 +852,7 @@ const LPEditor = () => {
           {activeTab === 'pricing'  && <PricingTab  data={data} onChange={handleChange} />}
           {activeTab === 'faq'      && <FAQTab      data={data} onChange={handleChange} />}
           {activeTab === 'links'    && <LinksTab    data={data} onChange={handleChange} />}
+          {activeTab === 'footer'   && <FooterTab   data={data} onChange={handleChange} />}
         </div>
       )}
 

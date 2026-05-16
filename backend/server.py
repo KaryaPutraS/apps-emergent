@@ -3540,6 +3540,43 @@ LP_DEFAULTS = {
         "enabled": True,
         "cta_text": "Coba Gratis 14 Hari",
     },
+    "footer": {
+        "description": "Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.",
+        "columns": [
+            {
+                "title": "Produk",
+                "links": [
+                    {"label": "Fitur", "url": "#fitur"},
+                    {"label": "Harga", "url": "#harga"},
+                    {"label": "Integrasi", "url": "#"},
+                    {"label": "Changelog", "url": "#"},
+                ],
+            },
+            {
+                "title": "Perusahaan",
+                "links": [
+                    {"label": "Tentang Kami", "url": "#"},
+                    {"label": "Blog", "url": "#"},
+                    {"label": "Karir", "url": "#"},
+                    {"label": "Kontak", "url": "#"},
+                ],
+            },
+            {
+                "title": "Dukungan",
+                "links": [
+                    {"label": "Dokumentasi", "url": "#"},
+                    {"label": "FAQ", "url": "#faq"},
+                    {"label": "WhatsApp Support", "url": "#"},
+                    {"label": "Status Sistem", "url": "#"},
+                ],
+            },
+        ],
+        "copyright": "© 2025 AdminPintar.id — All rights reserved.",
+        "legal_links": [
+            {"label": "Kebijakan Privasi", "url": "#"},
+            {"label": "Syarat & Ketentuan", "url": "#"},
+        ],
+    },
 }
 
 # ============================================================
@@ -3784,7 +3821,15 @@ def _sanitize_lp_html(value: str, max_len: int = 4000) -> str:
 _LP_HTML_FIELDS = {
     "promo_bar", "sub", "note", "final_h2", "final_sub", "a",
     "hero.sub", "pricing.note", "links.final_h2", "links.final_sub",
+    # Footer
+    "description", "copyright",
+    "footer.description", "footer.copyright",
 }
+# Field URL — disanitasi sebagai URL aman (skema dibatasi), bukan teks/HTML.
+_LP_URL_LEAVES = {"url", "whatsapp", "activation"}
+# Field URL yang JUGA boleh data:image (untuk image uploader inline).
+# data:image/svg+xml tetap diblokir karena bisa berisi script.
+_LP_IMAGE_URL_LEAVES = {"favicon_url", "logo_url"}
 # Headline adalah array of string yang bercampur tag <span class="accent italic">.
 _LP_HEADLINE_PATHS = {"hero.headline"}
 
@@ -3797,9 +3842,50 @@ def _strip_html_to_text(s: str, max_len: int = 1000) -> str:
     txt = re.sub(r"<[^>]+>", "", s)
     return txt[:max_len]
 
+def _sanitize_url(s: str, max_len: int = 500) -> str:
+    """Pastikan URL pakai skema aman. Tolak javascript:/data:/file: dll.
+    Izinkan: http(s)://, mailto:, tel:, /path-relatif, #anchor, kosong.
+    """
+    if not s:
+        return ""
+    if not isinstance(s, str):
+        s = str(s)
+    v = s.strip()[:max_len]
+    if not v:
+        return ""
+    if _LP_SAFE_URL_RE.match(v):
+        return v
+    # Skema tidak aman → kosongkan
+    return ""
+
+# Maksimum 2 MB untuk image data URL inline (sudah cukup besar untuk favicon/logo)
+_LP_IMAGE_URL_MAX = 2 * 1024 * 1024
+
+def _sanitize_image_url(s: str) -> str:
+    """Untuk favicon_url / logo_url: izinkan http(s)://... DAN data:image/...;base64,...
+    kecuali SVG (yang bisa berisi script). Pakai validator yang sudah ada.
+    """
+    if not s or not isinstance(s, str):
+        return ""
+    v = s.strip()
+    if not v:
+        return ""
+    lower = v.lower()
+    if lower.startswith("data:"):
+        # Reuse validator yang sudah ada — tolak SVG & non-image
+        try:
+            validate_image_data_url(v, "Gambar")
+        except HTTPException:
+            return ""
+        if len(v) > _LP_IMAGE_URL_MAX:
+            return ""
+        return v[:_LP_IMAGE_URL_MAX]
+    # Selain data:, fallback ke URL-safe biasa
+    return _sanitize_url(v, 1000)
+
 def _sanitize_lp_dict(node: Any, path: str = "") -> Any:
     """Recursive sanitization. Untuk field di _LP_HTML_FIELDS → allowlist sanitizer,
-    untuk field lain → strip semua HTML.
+    field URL → URL-safe check, sisanya → strip semua HTML.
     """
     if isinstance(node, dict):
         out = {}
@@ -3818,9 +3904,16 @@ def _sanitize_lp_dict(node: Any, path: str = "") -> Any:
             return [_sanitize_lp_html(item, 200) if isinstance(item, str) else item
                     for item in node[:10]]
         # FAQ list: tiap item dict berisi q (text) + a (html)
+        # Footer columns / legal links: array of dict {label, url}
         return [_sanitize_lp_dict(item, path) for item in node[:50]]
     if isinstance(node, str):
         leaf = path.rsplit(".", 1)[-1]
+        # Image-URL fields → izinkan data:image/png|jpeg|webp|gif (selain SVG)
+        if leaf in _LP_IMAGE_URL_LEAVES:
+            return _sanitize_image_url(node)
+        # URL fields → safe URL only
+        if leaf in _LP_URL_LEAVES:
+            return _sanitize_url(node, 500)
         # treat semua field 'a' (jawaban FAQ) sebagai HTML, dan field di whitelist
         if leaf in _LP_HTML_FIELDS or path in _LP_HTML_FIELDS:
             return _sanitize_lp_html(node, 4000)

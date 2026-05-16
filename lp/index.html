@@ -1264,7 +1264,7 @@
         </h1>
         <p class="hero-sub" id="lp-hero-sub">Chatbot WhatsApp pintar untuk bisnis Anda. Setup 5 menit, langsung aktif. Tidak perlu coding, tidak perlu IT.</p>
         <div class="hero-actions">
-          <a href="#" class="btn-primary lp-activation-link">
+          <a href="#" class="btn-primary lp-buy-link" target="_blank" rel="noopener">
             <span class="wa-icon"></span><span id="lp-hero-cta-primary">Coba Gratis 14 Hari</span>
           </a>
           <a href="#" class="btn-secondary lp-wa-link">💬 Chat via WhatsApp</a>
@@ -1776,36 +1776,38 @@
 
   <!-- Footer -->
   <footer>
-    <div class="footer-inner">
+    <div class="footer-inner" id="lp-footer-inner">
       <div class="footer-brand">
-        <a href="#" class="nav-logo lp-brand-logo"><img class="lp-logo-img" alt="" style="display:none;height:32px;width:auto;vertical-align:middle" /><span class="lp-brand-text"><span id="" class="lp-brand-name">AdminPintar</span><span class="nav-logo-dot lp-brand-suffix">.id</span></span></a>
-        <p>Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.</p>
+        <a href="#" class="nav-logo lp-brand-logo"><img class="lp-logo-img" alt="" style="display:none;height:32px;width:auto;vertical-align:middle" /><span class="lp-brand-text"><span class="lp-brand-name">AdminPintar</span><span class="nav-logo-dot lp-brand-suffix">.id</span></span></a>
+        <p id="lp-footer-desc">Asisten WhatsApp otomatis untuk UMKM Indonesia. Layani pelanggan 24 jam tanpa karyawan tambahan.</p>
       </div>
-      <div class="footer-col">
-        <h4>Produk</h4>
-        <a href="#fitur">Fitur</a>
-        <a href="#harga">Harga</a>
-        <a href="#">Integrasi</a>
-        <a href="#">Changelog</a>
-      </div>
-      <div class="footer-col">
-        <h4>Perusahaan</h4>
-        <a href="#">Tentang Kami</a>
-        <a href="#">Blog</a>
-        <a href="#">Karir</a>
-        <a href="#">Kontak</a>
-      </div>
-      <div class="footer-col">
-        <h4>Dukungan</h4>
-        <a href="#">Dokumentasi</a>
-        <a href="#faq">FAQ</a>
-        <a href="#" class="lp-wa-link">WhatsApp Support</a>
-        <a href="#">Status Sistem</a>
+      <div id="lp-footer-columns" style="display:contents">
+        <div class="footer-col">
+          <h4>Produk</h4>
+          <a href="#fitur">Fitur</a>
+          <a href="#harga">Harga</a>
+          <a href="#">Integrasi</a>
+          <a href="#">Changelog</a>
+        </div>
+        <div class="footer-col">
+          <h4>Perusahaan</h4>
+          <a href="#">Tentang Kami</a>
+          <a href="#">Blog</a>
+          <a href="#">Karir</a>
+          <a href="#">Kontak</a>
+        </div>
+        <div class="footer-col">
+          <h4>Dukungan</h4>
+          <a href="#">Dokumentasi</a>
+          <a href="#faq">FAQ</a>
+          <a href="#" class="lp-wa-link">WhatsApp Support</a>
+          <a href="#">Status Sistem</a>
+        </div>
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© 2025 AdminPintar.id — All rights reserved.</span>
-      <span>
+      <span id="lp-footer-copyright">© 2025 AdminPintar.id — All rights reserved.</span>
+      <span id="lp-footer-legal">
         <a href="#" style="color:#64748b;text-decoration:none;margin-right:16px">Kebijakan Privasi</a>
         <a href="#" style="color:#64748b;text-decoration:none">Syarat & Ketentuan</a>
       </span>
@@ -2113,11 +2115,13 @@
       });
     };
 
-    // Intercept all .lp-activation-link clicks to open demo modal
+    // Intercept .lp-activation-link clicks to open demo modal.
+    // CATATAN: .lp-buy-link DI-EXCLUDE — tombol itu langsung ikuti href
+    // (link aktivasi yang dikonfigurasi superadmin di LP Editor).
     document.addEventListener('DOMContentLoaded', function() {
       document.body.addEventListener('click', function(e) {
         var a = e.target.closest('.lp-activation-link');
-        if (a) {
+        if (a && !a.classList.contains('lp-buy-link')) {
           e.preventDefault();
           window.openDemoModal();
         }
@@ -2160,6 +2164,7 @@
   (function() {
     // Change this URL to match your API domain
     var API_URL = 'https://apps.adminpintar.id/api/lp-content';
+    var BRANDING_URL = 'https://apps.adminpintar.id/api/branding';
 
     function el(id) { return document.getElementById(id); }
     function setHtml(id, v) { var e = el(id); if (e && v != null) e.innerHTML = v; }
@@ -2173,6 +2178,39 @@
       var s = document.querySelector('.sticky-cta');
       if (s) s.href = v;
     }
+    // Escape utility — defense-in-depth meskipun backend sudah sanitasi
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function escText(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // ── Global branding override (file yang di-upload via Dashboard Branding) ──
+    // Punya prioritas LEBIH TINGGI dari LP Editor branding.favicon_url/logo_url.
+    // Flag _g* mencegah fetch /api/lp-content menimpa nilai yang sudah disetel.
+    var _gFaviconSet = false, _gLogoSet = false, _gNameSet = false;
+    fetch(BRANDING_URL)
+      .then(function(r) { return r.json(); })
+      .then(function(g) {
+        if (!g) return;
+        if (g.faviconDataUrl) {
+          var f = el('lp-favicon'); if (f) f.href = g.faviconDataUrl;
+          _gFaviconSet = true;
+        }
+        if (g.logoDataUrl) {
+          document.querySelectorAll('.lp-logo-img').forEach(function(img) {
+            img.src = g.logoDataUrl; img.style.display = 'inline-block';
+          });
+          document.querySelectorAll('.lp-brand-text').forEach(function(s) { s.style.display = 'none'; });
+          _gLogoSet = true;
+        }
+        if (g.siteName) {
+          document.querySelectorAll('.lp-brand-name').forEach(function(s) { s.textContent = g.siteName; });
+          _gNameSet = true;
+        }
+      })
+      .catch(function() { /* abaikan — pakai default / LP editor */ });
 
     fetch(API_URL)
       .then(function(r) { return r.json(); })
@@ -2188,16 +2226,19 @@
             document.title = b.page_title;
             var t = el('lp-page-title'); if (t) t.textContent = b.page_title;
           }
-          if (b.favicon_url) {
+          // Skip jika sudah di-set dari /api/branding (file upload via Dashboard)
+          if (b.favicon_url && !_gFaviconSet) {
             var f = el('lp-favicon'); if (f) f.href = b.favicon_url;
           }
-          if (b.logo_url) {
+          if (b.logo_url && !_gLogoSet) {
             document.querySelectorAll('.lp-logo-img').forEach(function(img) {
               img.src = b.logo_url; img.style.display = 'inline-block';
             });
             document.querySelectorAll('.lp-brand-text').forEach(function(s) { s.style.display = 'none'; });
-          } else {
-            document.querySelectorAll('.lp-brand-name').forEach(function(s) { if (b.brand_name) s.textContent = b.brand_name; });
+          } else if (!_gLogoSet) {
+            if (!_gNameSet) {
+              document.querySelectorAll('.lp-brand-name').forEach(function(s) { if (b.brand_name) s.textContent = b.brand_name; });
+            }
             document.querySelectorAll('.lp-brand-suffix').forEach(function(s) { if (b.brand_suffix) s.textContent = b.brand_suffix; });
           }
         }
@@ -2267,7 +2308,42 @@
           if (l.whatsapp) setHref('lp-wa-link', l.whatsapp);
           if (l.activation) {
             setHref('lp-activation-link', l.activation);
+            // Tombol pembelian (hero "Aktifkan ...") ikuti link aktivasi langsung
+            setHref('lp-buy-link', l.activation);
             setStickyHref(l.activation);
+          }
+        }
+
+        // Footer (description, columns, copyright, legal links)
+        if (d.footer) {
+          var ftr = d.footer;
+          setHtml('lp-footer-desc', ftr.description);
+          if (Array.isArray(ftr.columns)) {
+            var colsEl = el('lp-footer-columns');
+            if (colsEl) {
+              colsEl.innerHTML = ftr.columns.map(function(col) {
+                var t = escText((col && col.title) || '');
+                var links = (col && Array.isArray(col.links)) ? col.links : [];
+                var linksHtml = links.map(function(lk) {
+                  var label = escText((lk && lk.label) || '');
+                  var url = escAttr((lk && lk.url) || '#');
+                  return '<a href="' + url + '">' + label + '</a>';
+                }).join('');
+                return '<div class="footer-col"><h4>' + t + '</h4>' + linksHtml + '</div>';
+              }).join('');
+            }
+          }
+          setHtml('lp-footer-copyright', ftr.copyright);
+          if (Array.isArray(ftr.legal_links)) {
+            var legalEl = el('lp-footer-legal');
+            if (legalEl) {
+              legalEl.innerHTML = ftr.legal_links.map(function(lk, i) {
+                var label = escText((lk && lk.label) || '');
+                var url = escAttr((lk && lk.url) || '#');
+                var style = 'color:#64748b;text-decoration:none' + (i === 0 ? ';margin-right:16px' : '');
+                return '<a href="' + url + '" style="' + style + '">' + label + '</a>';
+              }).join('');
+            }
           }
         }
       })
@@ -2344,6 +2420,7 @@
     function getClickTarget(el) {
       while (el && el !== document.body) {
         if (el.classList) {
+          if (el.classList.contains('lp-buy-link')) return 'buy';
           if (el.classList.contains('lp-activation-link')) return 'activation';
           if (el.classList.contains('lp-wa-link')) return 'whatsapp';
           if (el.classList.contains('sticky-cta')) return 'sticky';
